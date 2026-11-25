@@ -19,7 +19,7 @@ Nie je potrebný žiadny build ani inštalácia závislostí.
 ## Testy
 
 Otvor `http://localhost:8000/test.html` (alebo `test.html` na adrese aplikácie).
-Testy dátovej vrstvy bežia priamo v prehliadači a používajú vlastnú dočasnú databázu.
+Testy dátovej vrstvy a výpočtov bežia priamo v prehliadači a používajú vlastnú dočasnú databázu.
 Ak je aplikácia v prehliadači už otvorená, najprv ju aktualizuj tlačidlom „Obnoviť“,
 inak testy dostanú starý `db.js` z cache.
 
@@ -35,6 +35,8 @@ Pravidlá nad rámec zadania:
 
 - `hladChut` je povinné, `tempo` môže byť `null`.
 - Zmena údajov odoslaného záznamu nastaví `odoslane` späť na `null`.
+- Na stupnici zápisu nemá hodnota 1 polovicu. Zóna a STOP na nej sa riadia
+  nastaveniami, karta je pevná.
 
 ## Nová verzia (cache)
 

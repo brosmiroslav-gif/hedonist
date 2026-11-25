@@ -1,9 +1,13 @@
-// Hedonist – testy dátovej vrstvy, spúšťajú sa otvorením test.html.
+// Hedonist – testy dátovej vrstvy a výpočtov, spúšťajú sa otvorením test.html.
 
 import {
   DB_NAME, DEFAULT_SETTINGS, HLAD_CHUT, JEDLA, TEMPA, ValidationError,
   ensurePersistentStorage, openDatabase,
 } from './db.js';
+import {
+  defaultMeal, formatCountdown, formatScore, halfScore, localDateTime, pendingLabel,
+  pendingRecords, remainingMs, scaleMarks, tapScore,
+} from './app.js';
 
 /* ---------- Malý testovací rámec ---------- */
 
@@ -280,6 +284,99 @@ dbTest('neplatné nastavenia odmietne', async ({ db }) => {
 test('žiadosť o trvalé úložisko vráti áno, nie alebo nepodporované', async () => {
   const result = await ensurePersistentStorage();
   assert(result === true || result === false || result === null, `Nečakané: ${result}`);
+});
+
+/* ---------- Zápis: výpočty ---------- */
+
+test('dátum a čas sú podľa Bratislavy (zimný aj letný čas)', () => {
+  assertEqual(localDateTime(new Date('2026-11-25T23:30:00Z')),
+    { datum: '2026-11-26', cas: '00:30' });
+  assertEqual(localDateTime(new Date('2026-07-01T10:05:00Z')),
+    { datum: '2026-07-01', cas: '12:05' });
+});
+
+test('predvolené jedlo podľa času', () => {
+  const cases = [
+    ['00:10', 'Raňajky'], ['09:29', 'Raňajky'], ['09:30', 'Desiata'], ['10:59', 'Desiata'],
+    ['11:00', 'Obed'], ['13:59', 'Obed'], ['14:00', 'Olovrant'], ['16:59', 'Olovrant'],
+    ['17:00', 'Večera'], ['20:29', 'Večera'], ['20:30', 'Neskoro večer'],
+    ['23:59', 'Neskoro večer'],
+  ];
+  assertEqual(cases.map(([time]) => [time, defaultMeal(time)]), cases);
+});
+
+test('ťuknutie na stupnici strieda celé číslo a pol stupňa nižšie', () => {
+  assertEqual(tapScore(null, 4), 4);
+  assertEqual(tapScore(4, 4), 3.5);
+  assertEqual(tapScore(3.5, 4), 4);
+  assertEqual(tapScore(3.5, 3), 3);
+  assertEqual(tapScore(7, 10), 10);
+  assertEqual([halfScore(10), halfScore(2)], [9.5, 1.5]);
+});
+
+test('pri hodnote 1 pol stupňa nie je', () => {
+  assertEqual([tapScore(null, 1), tapScore(1, 1), halfScore(1)], [1, 1, 1]);
+});
+
+test('hodnota sa zobrazuje s desatinnou čiarkou', () => {
+  assertEqual([formatScore(3.5), formatScore(7)], ['3,5', '7']);
+});
+
+const marked = (settings) => [10, 9, 8, 7, 6, 5, 4, 3, 2, 1]
+  .map((row) => [row, scaleMarks(row, settings)])
+  .filter(([, m]) => m.zone || m.stop)
+  .map(([row, m]) => `${row}:${m.stop ? 'stop' : 'zone'}:${m.tag}`);
+
+test('značky na stupnici zodpovedajú karte pri predvolených nastaveniach', () => {
+  assertEqual(marked(DEFAULT_SETTINGS), ['6:stop:STOP', '4:zone:ZAČNI', '3:zone:']);
+});
+
+test('značky na stupnici sa riadia nastaveniami', () => {
+  assertEqual(marked({ startOd: 2, startDo: 3, stop: 7 }),
+    ['7:stop:STOP', '3:zone:ZAČNI', '2:zone:']);
+  assertEqual(marked({ startOd: 3.5, startDo: 4, stop: 6.5 }),
+    ['7:stop:STOP', '4:zone:ZAČNI']);
+});
+
+// 25. 11. 2026 12:00 v Bratislave
+const NOON = new Date('2026-11-25T11:00:00Z');
+const stored = (changes) => ({
+  jedlo: 'Obed', datum: '2026-11-25', cas: '12:00', pred: 3.5,
+  po: null, po20: null, poZapisane: null, ...changes,
+});
+
+test('rozpracované sú jedlá z posledných 6 hodín bez po alebo po20', () => {
+  const records = [
+    stored({ id: 'bez-po', cas: '11:00' }),
+    stored({ id: 'bez-po20', cas: '09:00', po: 7 }),
+    stored({ id: 'len-po20', cas: '08:00', po20: 6 }),
+    stored({ id: 'hotové', cas: '10:00', po: 7, po20: 6.5 }),
+    stored({ id: 'presne-6h', cas: '06:00' }),
+    stored({ id: 'staré', cas: '05:59' }),
+    stored({ id: 'zajtra', datum: '2026-11-26' }),
+  ];
+  assertEqual(pendingRecords(records, NOON).map((r) => r.id),
+    ['bez-po', 'bez-po20', 'len-po20', 'presne-6h']);
+});
+
+test('rozpracované jedlo spred polnoci ostane viditeľné', () => {
+  const afterMidnight = new Date('2026-11-25T23:30:00Z'); // 26. 11. 00:30
+  assertEqual(pendingRecords([stored({ id: 'a', cas: '22:00' })], afterMidnight).length, 1);
+});
+
+test('odpočet 20 minút sa počíta od poZapisane', () => {
+  const record = stored({ po: 7, poZapisane: '2026-11-25T11:00:00.000Z' });
+  const at = (time) => remainingMs(record, new Date(`2026-11-25T${time}Z`));
+  assertEqual([at('11:00:00'), at('11:19:59'), at('11:20:00'), at('13:00:00')],
+    [1200000, 1000, 0, 0]);
+  assertEqual(remainingMs(stored({}), NOON), null);
+  assertEqual([formatCountdown(1200000), formatCountdown(61000), formatCountdown(500),
+    formatCountdown(0)], ['20:00', '01:01', '00:01', '00:00']);
+});
+
+test('text karty rozpracovaného jedla', () => {
+  assertEqual(pendingLabel(stored({ po: 7 })), 'Obed 12:00 · pred 3,5 · chýba: po 20 min');
+  assertEqual(pendingLabel(stored({})), 'Obed 12:00 · pred 3,5 · chýba: po');
 });
 
 /* ---------- Spustenie ---------- */

@@ -32,13 +32,83 @@
   </div>
 
   <main class="main" id="main">
-    <section data-screen="zapis">
-      <h2>Zápis</h2>
+    <section data-screen="zapis" class="entry">
+      <h2 class="visually-hidden">Zápis</h2>
+      <p class="form-error" id="db-error" role="alert" hidden></p>
 
-      <!-- Dočasná kontrola offline režimu a databázy, neskôr sa odstráni. -->
-      <div class="check">
-        <p id="check-offline" role="status">Pripravujem offline režim…</p>
-        <p id="check-storage" role="status">Otváram databázu…</p>
+      <div id="zapis-content" hidden>
+        <div id="entry-home">
+          <ul class="pending" id="pending" aria-label="Rozpracované jedlá"></ul>
+
+          <form id="entry-form" novalidate>
+            <h3>Nový záznam</h3>
+
+            <div class="when">
+              <label>Dátum <input type="date" id="entry-date"></label>
+              <label>Čas <input type="time" id="entry-time"></label>
+            </div>
+
+            <fieldset>
+              <legend>Jedlo</legend>
+              <div class="chips" id="entry-meal"></div>
+            </fieldset>
+
+            <fieldset>
+              <legend>Pred (1–10)</legend>
+              <p class="hint">Ťuknutie = celé číslo, druhé ťuknutie alebo podržanie = o pol menej.</p>
+              <ol class="scale scale-pick" id="entry-scale"></ol>
+            </fieldset>
+
+            <fieldset>
+              <legend>Hlad / chuť</legend>
+              <p class="hint">Zjedol by som teraz aj obyčajný chlieb?</p>
+              <div class="chips" id="entry-hunger"></div>
+            </fieldset>
+
+            <details id="entry-more">
+              <summary>Viac</summary>
+              <fieldset>
+                <legend>Tempo</legend>
+                <div class="chips" id="entry-tempo"></div>
+              </fieldset>
+              <label class="note">Poznámka <textarea id="entry-note" rows="2"></textarea></label>
+            </details>
+
+            <div class="actions">
+              <p class="form-error" id="entry-error" role="alert" hidden></p>
+              <button type="submit" class="primary">Uložiť</button>
+            </div>
+          </form>
+        </div>
+
+        <form id="after-form" novalidate hidden>
+          <h3 id="after-title">Po jedle</h3>
+          <p class="after-summary" id="after-summary"></p>
+
+          <div class="countdown" id="after-countdown" hidden>
+            <span id="after-countdown-label"></span>
+            <span class="countdown-time" id="after-timer" role="timer"></span>
+          </div>
+
+          <fieldset>
+            <legend id="after-legend">Po (1–10)</legend>
+            <ol class="scale scale-pick" id="after-scale"></ol>
+          </fieldset>
+
+          <div id="after-details">
+            <fieldset>
+              <legend>Tempo</legend>
+              <div class="chips" id="after-tempo"></div>
+            </fieldset>
+            <label class="note">Poznámka <textarea id="after-note" rows="2"></textarea></label>
+          </div>
+
+          <div class="actions">
+            <p class="form-error" id="after-error" role="alert" hidden></p>
+            <button type="button" class="secondary" id="after-back">Späť</button>
+            <button type="submit" class="primary">Uložiť</button>
+          </div>
+        </form>
       </div>
     </section>
 
@@ -53,7 +123,7 @@
       <div role="tabpanel" id="card-front" aria-labelledby="tab-front">
         <h3>Hlad ↔ sýtosť</h3>
         <p class="card-subtitle">Ohodnoť sa: pred jedlom · v polovici · 20 min po</p>
-        <ul class="scale" id="card-scale"></ul>
+        <ul class="scale scale-card" id="card-scale"></ul>
         <p class="card-motto">Začni pri 3–4. Prestaň pri 6 — za 20 minút sa to dotiahne na 7.</p>
       </div>
 
@@ -108,8 +178,16 @@
 
     <section data-screen="nastavenia" hidden>
       <h2>Nastavenia</h2>
+
+      <!-- Dočasná kontrola offline režimu a úložiska, v kroku 7 ju nahradia nastavenia. -->
+      <div class="check">
+        <p id="check-offline" role="status">Pripravujem offline režim…</p>
+        <p id="check-storage" role="status">Zisťujem stav úložiska…</p>
+      </div>
     </section>
   </main>
+
+  <p class="toast" id="toast" role="status"></p>
 
   <nav class="nav" aria-label="Hlavná navigácia">
     <a href="#zapis" data-link="zapis">
