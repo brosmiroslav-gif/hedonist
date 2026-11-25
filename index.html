@@ -237,12 +237,58 @@
       </div>
     </section>
 
-    <section data-screen="odoslat" hidden>
-      <h2>Odoslať</h2>
+    <section data-screen="odoslat" class="form-screen send" hidden>
+      <h2 class="visually-hidden">Odoslať</h2>
+
+      <div id="send-content" hidden>
+        <fieldset>
+          <legend>Rozsah</legend>
+          <div class="chips" id="send-range"></div>
+        </fieldset>
+
+        <div class="when" id="send-custom" hidden>
+          <label>Od <input type="date" id="send-from"></label>
+          <label>Do <input type="date" id="send-to"></label>
+        </div>
+
+        <p class="hint" id="send-empty" hidden></p>
+
+        <div id="send-mail" hidden>
+          <p class="mail-line"><strong>Komu:</strong> <span id="send-recipient"></span></p>
+          <p class="mail-line"><strong>Predmet:</strong> <span id="send-subject"></span></p>
+          <button type="button" class="secondary wide" id="send-copy-subject">Kopírovať predmet</button>
+
+          <pre class="preview" id="send-preview" tabindex="0" aria-label="Náhľad tela e-mailu"></pre>
+          <button type="button" class="secondary wide" id="send-copy-body">Kopírovať telo</button>
+
+          <div class="actions send-actions">
+            <p class="hint" id="send-note"></p>
+            <p class="form-error" id="send-error" role="alert" hidden></p>
+            <button type="button" class="primary" id="send-button">Odoslať e-mailom</button>
+            <button type="button" class="primary" id="send-copy-all" hidden>Kopírovať do schránky</button>
+          </div>
+        </div>
+
+        <div class="backup">
+          <h3>Záloha</h3>
+          <button type="button" class="secondary wide" id="backup-button">Záloha (JSON)</button>
+          <button type="button" class="secondary wide" id="restore-button">Obnoviť zo zálohy</button>
+          <input type="file" id="restore-file" accept="application/json,.json" hidden>
+          <p class="hint" id="backup-status" role="status"></p>
+          <p class="form-error" id="backup-error" role="alert" hidden></p>
+        </div>
+      </div>
     </section>
 
-    <section data-screen="nastavenia" hidden>
+    <section data-screen="nastavenia" class="form-screen" hidden>
       <h2>Nastavenia</h2>
+
+      <div id="settings-content" hidden>
+        <label class="note">E-mailová adresa príjemcu
+          <input type="email" id="settings-email" autocomplete="email" autocapitalize="off" spellcheck="false">
+        </label>
+        <p class="form-error" id="settings-error" role="alert" hidden></p>
+      </div>
 
       <!-- Dočasná kontrola offline režimu a úložiska, v kroku 7 ju nahradia nastavenia. -->
       <div class="check">

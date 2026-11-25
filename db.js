@@ -5,6 +5,7 @@ const DB_VERSION = 1;
 const RECORDS = 'zaznamy';
 const SETTINGS = 'nastavenia';
 const SETTINGS_KEY = 'app';
+const PENDING_SEND_KEY = 'odosielanie';
 
 export const JEDLA = Object.freeze(
   ['Raňajky', 'Desiata', 'Obed', 'Olovrant', 'Večera', 'Neskoro večer', 'Maškrta']);
@@ -74,6 +75,63 @@ function pick(object, fields) {
     fields.filter((field) => object[field] !== undefined).map((field) => [field, object[field]]));
 }
 
+const isTimestamp = (value) => typeof value === 'string' && !Number.isNaN(Date.parse(value));
+const isOptionalTimestamp = (value) => value === null || isTimestamp(value);
+
+// Záznam zo zálohy musí mať aj polia, ktoré inak dopĺňa táto vrstva.
+const IMPORT_RULES = {
+  id: (value) => typeof value === 'string' && value !== '',
+  ...RECORD_RULES,
+  vytvorene: isTimestamp,
+  upravene: isTimestamp,
+  odoslane: isOptionalTimestamp,
+  poZapisane: isOptionalTimestamp,
+};
+
+/** Skontroluje záznam zo zálohy a ponechá len známe polia. */
+function importedRecord(source, index) {
+  const record = {
+    po: null,
+    po20: null,
+    tempo: null,
+    poznamka: '',
+    odoslane: null,
+    poZapisane: null,
+    ...pick(source ?? {}, Object.keys(IMPORT_RULES)),
+  };
+  try {
+    validate(record, IMPORT_RULES);
+  } catch (error) {
+    error.message = `Záznam č. ${index + 1}: ${error.message}`;
+    throw error;
+  }
+  return record;
+}
+
+function importedSettings(source) {
+  const settings = { ...DEFAULT_SETTINGS, ...pick(source, Object.keys(DEFAULT_SETTINGS)) };
+  validate(settings, SETTINGS_RULES);
+  settings.email = settings.email.trim();
+  return settings;
+}
+
+/**
+ * Čo urobiť so záznamom zo zálohy: novší `upravene` vyhráva. Pri rovnakom
+ * sú údaje zhodné, preberie sa len novší čas odoslania.
+ */
+function mergeRecord(current, incoming) {
+  if (!current) return { action: 'added', record: incoming };
+  const difference = Date.parse(incoming.upravene) - Date.parse(current.upravene);
+  if (difference > 0) return { action: 'updated', record: incoming };
+  const sentLater = incoming.odoslane !== null
+    && (current.odoslane === null
+      || Date.parse(incoming.odoslane) > Date.parse(current.odoslane));
+  if (difference === 0 && sentLater) {
+    return { action: 'unchanged', record: { ...current, odoslane: incoming.odoslane } };
+  }
+  return { action: 'unchanged', record: null };
+}
+
 function compareRecords(a, b) {
   return a.datum.localeCompare(b.datum)
     || a.cas.localeCompare(b.cas)
@@ -95,14 +153,15 @@ function openConnection(name) {
 }
 
 /**
- * Spustí operácie v jednej transakcii. Funkcia `work` dostane object store
- * a `done(výsledok)`. Prísľub sa splní až po zapísaní transakcie; ak `work`
- * alebo jej spätné volanie vyhodí chybu, nezapíše sa nič.
+ * Spustí operácie v jednej transakcii. Funkcia `work` dostane (prvý) object
+ * store, `done(výsledok)`, obal pre spätné volania a transakciu. Prísľub sa
+ * splní až po zapísaní transakcie; ak `work` alebo jej spätné volanie vyhodí
+ * chybu, nezapíše sa nič.
  */
-function transact(connection, storeName, mode, work) {
+function transact(connection, storeNames, mode, work) {
   return new Promise((resolve, reject) => {
     // 'strict': zápis je potvrdený až po uložení na disk.
-    const transaction = connection.transaction(storeName, mode, { durability: 'strict' });
+    const transaction = connection.transaction(storeNames, mode, { durability: 'strict' });
     let result;
     let failure;
     transaction.oncomplete = () => resolve(result);
@@ -117,9 +176,10 @@ function transact(connection, storeName, mode, work) {
       }
     };
     guard(() => work(
-      transaction.objectStore(storeName),
+      transaction.objectStore([storeNames].flat()[0]),
       (value) => { result = value; },
       guard,
+      transaction,
     ))();
   });
 }
@@ -248,6 +308,63 @@ export async function openDatabase(name = DB_NAME, { now = () => new Date() } = 
           store.put(next, SETTINGS_KEY);
           done(next);
         });
+      });
+    },
+
+    /** Záznamy, pri ktorých sa ešte treba opýtať, či bol e-mail odoslaný. */
+    getPendingSend() {
+      return run(SETTINGS, 'readonly', (store, done) => {
+        const request = store.get(PENDING_SEND_KEY);
+        request.onsuccess = () => done(request.result ?? null);
+      });
+    },
+
+    /** Zapamätá si rozposlané záznamy; `null` otázku zruší. */
+    setPendingSend(ids) {
+      return run(SETTINGS, 'readwrite', (store) => {
+        if (ids) store.put(ids, PENDING_SEND_KEY);
+        else store.delete(PENDING_SEND_KEY);
+      });
+    },
+
+    /**
+     * Obnova zo zálohy: záznamy zlúči podľa `id`. Nastavenia použije len vtedy,
+     * keď sú v telefóne ešte predvolené. Pri chybe sa nezmení nič.
+     */
+    async importData({ records, settings }) {
+      const incoming = records.map(importedRecord);
+      const restored = settings ? importedSettings(settings) : null;
+
+      return run([RECORDS, SETTINGS], 'readwrite', (store, done, guard, transaction) => {
+        const result = { added: 0, updated: 0, unchanged: 0, settingsRestored: false };
+        done(result);
+
+        if (restored) {
+          const settingsStore = transaction.objectStore(SETTINGS);
+          const request = settingsStore.get(SETTINGS_KEY);
+          request.onsuccess = guard(() => {
+            const current = { ...DEFAULT_SETTINGS, ...request.result };
+            const keys = Object.keys(DEFAULT_SETTINGS);
+            const untouched = keys.every((key) => current[key] === DEFAULT_SETTINGS[key]);
+            if (untouched && keys.some((key) => restored[key] !== current[key])) {
+              settingsStore.put(restored, SETTINGS_KEY);
+              result.settingsRestored = true;
+            }
+          });
+        }
+
+        // Po jednom, aby sa zlúčili aj opakované id v samotnej zálohe.
+        const mergeFrom = (index) => {
+          if (index >= incoming.length) return;
+          const request = store.get(incoming[index].id);
+          request.onsuccess = guard(() => {
+            const { action, record } = mergeRecord(request.result, incoming[index]);
+            if (record) store.put(record);
+            result[action] += 1;
+            mergeFrom(index + 1);
+          });
+        };
+        mergeFrom(0);
       });
     },
 

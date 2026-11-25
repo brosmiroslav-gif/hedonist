@@ -865,6 +865,61 @@ details[open] summary::before {
   background: var(--accent);
 }
 
+/* ---------- Odoslať ---------- */
+
+.wide {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+}
+
+.mail-line {
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+
+.mail-line strong {
+  font-weight: 600;
+}
+
+.preview {
+  max-height: 12rem;
+  margin: 16px 0 0;
+  padding: 10px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  font: 500 0.75rem/1.5 var(--font-mono);
+  user-select: text;
+}
+
+.send-actions {
+  margin: 16px -16px 0;
+}
+
+.send-actions p {
+  width: 100%;
+  margin: 0;
+}
+
+.send-actions p:empty {
+  display: none;
+}
+
+.backup .hint:not(:empty),
+.backup .form-error {
+  margin: 12px 0 0;
+}
+
+.backup {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--text);
+}
+
+.backup h3 {
+  margin-bottom: 0;
+}
+
 /* ---------- Dialóg ---------- */
 
 .dialog {

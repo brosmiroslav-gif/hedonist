@@ -7,8 +7,11 @@ import {
 import {
   dayLabel, defaultMeal, formatAverage, formatCountdown, formatScore, formatValues, groupByDay,
   halfScore, localDateTime, pendingLabel, pendingRecords, remainingMs, scaleMarks, shiftDate,
-  tapScore, weekSummary, zoneResult,
+  selectForSending, tapScore, weekSummary, zoneResult,
 } from './app.js';
+import {
+  backupFileName, createBackup, emailBody, emailSubject, mailtoUrl, parseBackup,
+} from './export.js';
 
 /* ---------- Malý testovací rámec ---------- */
 
@@ -430,6 +433,214 @@ test('záznamy sú po dňoch, najnovšie hore', () => {
 
 test('nadpis dňa je po slovensky', () => {
   assertEqual(dayLabel('2026-11-25'), 'Streda 25. 11. 2026');
+});
+
+/* ---------- E-mail ---------- */
+
+const mail = (changes) => ({
+  id: 'x', datum: '2026-11-25', cas: '12:00', jedlo: 'Obed', pred: 3.5, po: 7, po20: null,
+  hladChut: 'Hlad', tempo: 'Normálne', poznamka: '', vytvorene: T1, odoslane: null, ...changes,
+});
+
+test('telo e-mailu presne podľa príkladu v zadaní', () => {
+  const records = [
+    mail({ id: 'a92e…', cas: '18:30', jedlo: 'Večera', pred: 3, po: 6, po20: 6.5,
+      tempo: 'Pomaly' }),
+    mail({ id: '8f1c…', poznamka: 'Bez piva by bolo 6' }),
+  ];
+  assertEqual(emailBody(records), [
+    'Záznamy hladu a sýtosti – export z aplikácie Hedonist v1.0',
+    '',
+    '---BEGIN CSV---',
+    'datum;cas;jedlo;pred;po;po20;hlad_chut;tempo;poznamka;id',
+    '2026-11-25;12:00;Obed;3.5;7;;Hlad;Normálne;Bez piva by bolo 6;8f1c…',
+    '2026-11-25;18:30;Večera;3;6;6.5;Hlad;Pomaly;;a92e…',
+    '---END CSV---',
+  ].join('\n'));
+});
+
+const csvRows = (records) => emailBody(records).split('\n').slice(4, -1);
+
+test('prázdne hodnoty sú v CSV prázdne', () => {
+  assertEqual(csvRows([mail({ po: null, po20: null, tempo: null })]),
+    ['2026-11-25;12:00;Obed;3.5;;;Hlad;;;x']);
+});
+
+test('poznámka nemá bodkočiarky ani zalomenia riadkov', () => {
+  const [row] = csvRows([mail({ poznamka: 'a;b;;c\nd\r\ne\rf\u2028g „h“, "i"' })]);
+  assertEqual(row, '2026-11-25;12:00;Obed;3.5;7;;Hlad;Normálne;a,b,,c d e f g „h“, "i";x');
+  assertEqual(row.split(';').length, 10);
+});
+
+test('riadky sú zoradené podľa dátumu a času vzostupne', () => {
+  const rows = csvRows([
+    mail({ id: 'c', datum: '2026-11-26', cas: '07:00' }),
+    mail({ id: 'b', cas: '18:00' }),
+    mail({ id: 'a', cas: '08:00' }),
+  ]);
+  assertEqual(rows.map((row) => row.split(';').at(-1)), ['a', 'b', 'c']);
+});
+
+test('predmet pre jeden deň a pre viac dní', () => {
+  const days = (...dates) => dates.map((datum) => mail({ datum }));
+  assertEqual(emailSubject(days('2026-11-25', '2026-11-25', '2026-11-25')),
+    '[HLAD] 2026-11-25 (3 záznamy)');
+  assertEqual(
+    emailSubject(days('2026-11-26', '2026-11-25', '2026-11-25', '2026-11-26', '2026-11-25')),
+    '[HLAD] 2026-11-25 – 2026-11-26 (5 záznamov)');
+});
+
+test('skloňovanie počtu záznamov', () => {
+  const label = (count) =>
+    emailSubject(Array.from({ length: count }, () => mail({}))).split('(')[1];
+  assertEqual([1, 2, 4, 5, 22].map(label),
+    ['1 záznam)', '2 záznamy)', '4 záznamy)', '5 záznamov)', '22 záznamov)']);
+});
+
+test('mailto zakóduje adresáta, predmet aj telo bez straty', () => {
+  const body = emailBody([mail({ poznamka: 'č & ? # = +' })]);
+  const url = mailtoUrl('niekto+hlad@example.com', '[HLAD] 2026-11-25 (1 záznam)', body);
+  assert(url.startsWith('mailto:niekto%2Bhlad@example.com?subject=%5BHLAD%5D%20'), url);
+  const [, subject, text] = /\?subject=([^&]*)&body=([^&]*)$/.exec(url);
+  assertEqual(decodeURIComponent(subject), '[HLAD] 2026-11-25 (1 záznam)');
+  assertEqual(decodeURIComponent(text), body.replaceAll('\n', '\r\n'));
+});
+
+test('výber záznamov na odoslanie podľa rozsahu', () => {
+  const records = [
+    mail({ id: 'dnes', datum: '2026-11-25', odoslane: T2 }),
+    mail({ id: 'pred6', datum: '2026-11-19' }),
+    mail({ id: 'pred7', datum: '2026-11-18' }),
+    mail({ id: 'zajtra', datum: '2026-11-26', odoslane: T2 }),
+  ];
+  const pick = (range, bounds = {}) =>
+    selectForSending(records, range, { today: '2026-11-25', ...bounds }).map((r) => r.id);
+  assertEqual(pick('Neodoslané'), ['pred6', 'pred7']);
+  assertEqual(pick('Dnes'), ['dnes']);
+  assertEqual(pick('Posledných 7 dní'), ['dnes', 'pred6']);
+  assertEqual(pick('Vlastný rozsah', { from: '2026-11-18', to: '2026-11-19' }),
+    ['pred6', 'pred7']);
+  assertEqual(pick('Vlastný rozsah', { from: '2026-11-26', to: '2026-11-25' }), []);
+  assertEqual(pick('Vlastný rozsah', { from: '', to: '2026-11-25' }), []);
+});
+
+/* ---------- Záloha a obnova ---------- */
+
+const snapshot = async (db) => createBackup(await db.getAllRecords(), await db.getSettings());
+const restore = (db, text) => db.importData(parseBackup(text));
+
+dbTest('záloha a obnova do prázdnej databázy vráti všetko bez duplicít',
+  async ({ db, clock }) => {
+    const first = await db.addRecord(meal({ po: 7, poznamka: 'ľščťž;\n„x“' }));
+    await db.addRecord(meal({ cas: '18:00', tempo: 'Pomaly' }));
+    clock.time = T2;
+    await db.markSent([first.id]);
+    await db.saveSettings({ email: 'niekto@example.com', stop: 6.5 });
+    const records = await db.getAllRecords();
+    const settings = await db.getSettings();
+    const text = await snapshot(db);
+
+    for (const record of records) await db.deleteRecord(record.id);
+    await db.saveSettings(DEFAULT_SETTINGS);
+
+    assertEqual(await restore(db, text),
+      { added: 2, updated: 0, unchanged: 0, settingsRestored: true });
+    const byKey = (list) => list.map((r) => Object.entries(r).sort());
+    assertEqual(byKey(await db.getAllRecords()), byKey(records));
+    assertEqual(await db.getSettings(), settings);
+
+    assertEqual(await restore(db, text),
+      { added: 0, updated: 0, unchanged: 2, settingsRestored: false });
+    assertEqual((await db.getAllRecords()).length, 2);
+  });
+
+dbTest('pri zlúčení vyhráva novší upravene', async ({ db, clock }) => {
+  const { id } = await db.addRecord(meal({ poznamka: 'stará' }));
+  const older = await snapshot(db);
+  clock.time = T2;
+  await db.updateRecord(id, { poznamka: 'nová' });
+  const newer = await snapshot(db);
+
+  assertEqual((await restore(db, older)).unchanged, 1);
+  assertEqual((await db.getRecord(id)).poznamka, 'nová', 'staršia záloha neprepíše');
+
+  await db.deleteRecord(id);
+  await restore(db, older);
+  assertEqual((await restore(db, newer)).updated, 1);
+  assertEqual((await db.getRecord(id)).poznamka, 'nová', 'novšia záloha prepíše');
+});
+
+dbTest('pri rovnakom upravene sa nestratí informácia o odoslaní', async ({ db, clock }) => {
+  const { id } = await db.addRecord(meal());
+  const unsent = await snapshot(db);
+  clock.time = T2;
+  await db.markSent([id]);
+  const sent = await snapshot(db);
+
+  await restore(db, unsent);
+  assertEqual((await db.getRecord(id)).odoslane, T2);
+  await db.deleteRecord(id);
+  await restore(db, unsent);
+  await restore(db, sent);
+  assertEqual((await db.getRecord(id)).odoslane, T2);
+});
+
+dbTest('obnova neprepíše zmenené nastavenia', async ({ db }) => {
+  await db.saveSettings({ email: 'stary@example.com', stop: 7 });
+  const text = await snapshot(db);
+  await db.saveSettings({ email: 'novy@example.com', stop: 6 });
+  assertEqual((await restore(db, text)).settingsRestored, false);
+  assertEqual((await db.getSettings()).email, 'novy@example.com');
+});
+
+dbTest('opakované id v zálohe nevytvorí duplicitu', async ({ db }) => {
+  await db.addRecord(meal());
+  const data = parseBackup(await snapshot(db));
+  await db.deleteRecord(data.records[0].id);
+  const newer = { ...data.records[0], upravene: T4, poznamka: 'druhá' };
+  const result = await db.importData({ records: [data.records[0], newer], settings: null });
+  assertEqual([result.added, result.updated], [1, 1]);
+  assertEqual((await db.getAllRecords()).map((r) => r.poznamka), ['druhá']);
+});
+
+dbTest('chybná záloha nezmení nič', async ({ db }) => {
+  await db.addRecord(meal());
+  const good = parseBackup(await snapshot(db)).records[0];
+  const before = await db.getAllRecords();
+  const other = { ...good, id: 'iné' };
+  for (const bad of [
+    { ...other, pred: 12 }, { ...other, id: '' }, { ...other, upravene: 'včera' }, null,
+  ]) {
+    await assertRejects(() => db.importData({ records: [other, bad], settings: null }),
+      (error) => assert(error.message.startsWith('Záznam č. 2'), error.message));
+  }
+  await assertRejects(() => db.importData({ records: [other], settings: { stop: 99 } }),
+    isInvalid('stop'));
+  assertEqual(await db.getAllRecords(), before);
+});
+
+test('cudzí alebo poškodený súbor sa odmietne', async () => {
+  for (const text of [
+    'nie je json', '[]', 'null', '{"aplikacia":"Iná","format":1,"zaznamy":[]}',
+    '{"aplikacia":"Hedonist","format":1}',
+    '{"aplikacia":"Hedonist","format":2,"zaznamy":[]}',
+  ]) {
+    await assertRejects(async () => parseBackup(text), undefined, `Prijaté: ${text}`);
+  }
+  assertEqual(parseBackup('\uFEFF{"aplikacia":"Hedonist","format":1,"zaznamy":[]}'),
+    { records: [], settings: null });
+  assertEqual(backupFileName('2026-11-25'), 'hedonist-zaloha-2026-11-25.json');
+});
+
+dbTest('rozrobené odoslanie prežije zatvorenie aplikácie', async ({ db, open }) => {
+  assertEqual(await db.getPendingSend(), null);
+  await db.setPendingSend(['a', 'b']);
+  db.close();
+  const again = await open();
+  assertEqual(await again.getPendingSend(), ['a', 'b']);
+  await again.setPendingSend(null);
+  assertEqual(await again.getPendingSend(), null);
+  assertEqual(await again.getSettings(), { ...DEFAULT_SETTINGS });
 });
 
 /* ---------- Spustenie ---------- */

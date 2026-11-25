@@ -3,6 +3,9 @@
 import {
   DEFAULT_SETTINGS, HLAD_CHUT, JEDLA, TEMPA, ensurePersistentStorage, openDatabase,
 } from './db.js';
+import {
+  MAILTO_LIMIT, backupFileName, createBackup, emailBody, emailSubject, mailtoUrl, parseBackup,
+} from './export.js';
 
 const SCREENS = ['zapis', 'karta', 'zaznamy', 'odoslat', 'nastavenia'];
 const AFTER_PREFIX = 'doplnit-'; // #doplnit-<id> = doplnenie po jedle
@@ -14,6 +17,9 @@ const PO20_DELAY_MS = 20 * 60 * 1000;
 const PENDING_MAX_AGE_MIN = 6 * 60;
 const PENDING_MAX_AHEAD_MIN = 60; // tolerancia pre čas zadaný mierne dopredu
 const LONG_PRESS_MS = 450; // skôr, než Android spustí vlastné dlhé podržanie
+const RETURN_FALLBACK_MS = 3000; // ak sa po odoslaní aplikácia vôbec neopustí
+
+const RANGES = Object.freeze(['Neodoslané', 'Dnes', 'Posledných 7 dní', 'Vlastný rozsah']);
 
 // Stupnica hladu a sýtosti (presný text karty, sekcia 5 zadania).
 const SCALE = [
@@ -133,11 +139,24 @@ export function shiftDate(datum, days) {
   return date.toISOString().slice(0, 10);
 }
 
-/** Súhrn za posledných 7 dní: dnešok a 6 kalendárnych dní pred ním. */
+const between = (records, from, to) =>
+  records.filter(({ datum }) => datum >= from && datum <= to);
+
+/** Posledných 7 dní: dnešok a 6 kalendárnych dní pred ním. */
+const lastWeek = (records, today) => between(records, shiftDate(today, -6), today);
+
+/** Záznamy na odoslanie podľa zvoleného rozsahu (jedna z hodnôt `RANGES`). */
+export function selectForSending(records, range, { today, from, to }) {
+  const [unsent, todayOnly, week] = RANGES;
+  if (range === unsent) return records.filter(({ odoslane }) => odoslane === null);
+  if (range === todayOnly) return between(records, today, today);
+  if (range === week) return lastWeek(records, today);
+  return from && to ? between(records, from, to) : [];
+}
+
+/** Súhrn za posledných 7 dní. */
 export function weekSummary(records, settings, now = new Date()) {
-  const today = localDateTime(now).datum;
-  const from = shiftDate(today, -6);
-  const week = records.filter(({ datum }) => datum >= from && datum <= today);
+  const week = lastWeek(records, localDateTime(now).datum);
   const average = (values) => (values.length
     ? values.reduce((sum, value) => sum + value, 0) / values.length
     : null);
@@ -310,8 +329,12 @@ function showError(id, message) {
 }
 
 /** Potvrdzovací dialóg; vráti `true`, len ak používateľ potvrdí. */
-function askConfirm({ title, text, yes, no }) {
+async function askConfirm({ title, text, yes, no }) {
   const dialog = byId('dialog');
+  // Ak je otvorená iná otázka, počkáme, aby sa odpovede nepomiešali.
+  while (dialog.open) {
+    await new Promise((resolve) => dialog.addEventListener('close', resolve, { once: true }));
+  }
   byId('dialog-title').textContent = title;
   byId('dialog-text').textContent = text;
   byId('dialog-yes').textContent = yes;
@@ -827,6 +850,293 @@ function createRecordsScreen(db) {
   return { show };
 }
 
+/* ---------- Odoslať a záloha ---------- */
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (error) {
+    console.warn('Kopírovanie do schránky zlyhalo:', error);
+    return false;
+  }
+}
+
+/**
+ * Zavolá `callback`, keď sa používateľ vráti do aplikácie. Ak ju do `fallbackMs`
+ * vôbec neopustí, zavolá ho aj tak. Vráti funkciu na zrušenie.
+ */
+function whenBack(callback, fallbackMs) {
+  let left = document.hidden;
+  const listeners = new AbortController();
+  const { signal } = listeners;
+  const finish = () => {
+    cancel();
+    callback();
+  };
+  const timer = fallbackMs ? setTimeout(() => { if (!left) finish(); }, fallbackMs) : null;
+  function cancel() {
+    clearTimeout(timer);
+    listeners.abort();
+  }
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) left = true;
+    else if (left) finish();
+  }, { signal });
+  window.addEventListener('blur', () => { left = true; }, { signal });
+  window.addEventListener('focus', () => { if (left && !document.hidden) finish(); }, { signal });
+  return cancel;
+}
+
+function downloadFile(name, text) {
+  const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  const link = element('a', '');
+  link.href = url;
+  link.download = name;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
+/** Obrazovka Odoslať. `onSent` sa zavolá po označení záznamov ako odoslaných. */
+function createSendScreen(db, onSent) {
+  const from = byId('send-from');
+  const to = byId('send-to');
+  const file = byId('restore-file');
+  const range = createChips(byId('send-range'), RANGES, {
+    onSelect: () => show().catch((error) => console.error(error)),
+  });
+  range.set(RANGES[0]);
+
+  let request = 0;
+  let draft = null; // to, čo práve vidno v náhľade
+  let stopWaiting = null;
+  let asking = false;
+
+  /** Po návrate sa opýta, či bol e-mail odoslaný. */
+  async function confirmSent() {
+    if (asking) return;
+    asking = true;
+    try {
+      const ids = await db.getPendingSend();
+      if (!ids) return;
+      const sent = await askConfirm({
+        title: 'Odoslal si e-mail?',
+        text: `Počet záznamov v exporte: ${ids.length}`,
+        yes: 'Áno',
+        no: 'Nie',
+      });
+      if (sent) await db.markSent(ids);
+      await db.setPendingSend(null);
+      if (sent) onSent();
+    } finally {
+      asking = false;
+    }
+  }
+
+  function waitForReturn(fallbackMs = RETURN_FALLBACK_MS) {
+    stopWaiting?.();
+    stopWaiting = whenBack(
+      () => confirmSent().catch((error) => console.error(error)), fallbackMs);
+  }
+
+  function showFallback(message) {
+    byId('send-copy-all').hidden = false;
+    showError('send-error', message);
+  }
+
+  async function send() {
+    if (!draft) return;
+    const { ids, email, subject, body, url } = draft;
+    showError('send-error', '');
+    stopWaiting?.();
+
+    if (url.length <= MAILTO_LIMIT) {
+      // Poštu otvárame hneď v obsluhe ťuknutia, inak ju prehliadač môže zablokovať.
+      const saved = db.setPendingSend(ids);
+      location.href = url;
+      await saved;
+      waitForReturn();
+      return;
+    }
+
+    const data = { title: subject, text: body };
+    if (!draft.canShare) {
+      showFallback('Zdieľanie nie je dostupné. Skopíruj e-mail do schránky.');
+      return;
+    }
+    // Zdieľanie neprenesie adresáta, preto ho dáme do schránky.
+    if (email && !(await copyText(email))) {
+      showToast('Adresu sa nepodarilo skopírovať');
+    }
+    await db.setPendingSend(ids);
+    try {
+      await navigator.share(data);
+      waitForReturn();
+    } catch (error) {
+      await db.setPendingSend(null);
+      if (error.name !== 'AbortError') {
+        console.warn('Zdieľanie zlyhalo:', error);
+        showFallback('Zdieľanie zlyhalo. Skopíruj e-mail do schránky.');
+      }
+    }
+  }
+
+  async function copy(text, done) {
+    const copied = await copyText(text);
+    showError('send-error', copied ? '' : 'Kopírovanie zlyhalo. Označ text v náhľade ručne.');
+    if (copied) showToast(done);
+    return copied;
+  }
+
+  function sendNote({ email, url, canShare }) {
+    const missing = 'Adresa príjemcu nie je nastavená – doplníš ju v pošte alebo v Nastaveniach.';
+    if (url.length <= MAILTO_LIMIT) return email ? '' : missing;
+    if (!canShare) return 'Export je dlhý a zdieľanie nie je dostupné. Použi schránku.';
+    const address = email
+      ? `Adresa ${email} sa skopíruje do schránky, prilep ju do poľa Komu.`
+      : missing;
+    return `Export je dlhý, otvorí sa zdieľanie – vyber Gmail. ${address}`;
+  }
+
+  async function show() {
+    const current = ++request;
+    const [records, settings] = await Promise.all([db.getAllRecords(), db.getSettings()]);
+    if (current !== request) return;
+
+    const custom = range.value === RANGES[3];
+    byId('send-custom').hidden = !custom;
+    const today = localDateTime().datum;
+    from.value ||= shiftDate(today, -6);
+    to.value ||= today;
+
+    const selected = selectForSending(records, range.value,
+      { today, from: from.value, to: to.value });
+
+    draft = null;
+    if (selected.length > 0) {
+      const subject = emailSubject(selected);
+      const body = emailBody(selected);
+      draft = {
+        ids: selected.map(({ id }) => id),
+        email: settings.email,
+        subject,
+        body,
+        url: mailtoUrl(settings.email, subject, body),
+        canShare: Boolean(navigator.share)
+          && (navigator.canShare?.({ title: subject, text: body }) ?? true),
+      };
+    }
+
+    const invalid = custom && from.value > to.value;
+    byId('send-empty').textContent = invalid
+      ? 'Dátum „od“ je neskôr ako „do“.'
+      : 'Vo vybranom rozsahu nie sú žiadne záznamy.';
+    byId('send-empty').hidden = Boolean(draft);
+    byId('send-mail').hidden = !draft;
+    showError('send-error', '');
+    if (!draft) return;
+
+    byId('send-recipient').textContent = draft.email || 'nenastavený';
+    byId('send-subject').textContent = draft.subject;
+    byId('send-preview').textContent = draft.body;
+    byId('send-note').textContent = sendNote(draft);
+    // Ak sa dlhý export nedá ani zdieľať, ostáva len schránka.
+    const onlyClipboard = draft.url.length > MAILTO_LIMIT && !draft.canShare;
+    byId('send-button').hidden = onlyClipboard;
+    byId('send-copy-all').hidden = !onlyClipboard;
+  }
+
+  async function backup() {
+    const [records, settings] = await Promise.all([db.getAllRecords(), db.getSettings()]);
+    const name = backupFileName(localDateTime().datum);
+    downloadFile(name, createBackup(records, settings));
+    byId('backup-status').textContent =
+      `Záloha ${name} (záznamov: ${records.length}) je v stiahnutých súboroch.`;
+  }
+
+  async function restore(source) {
+    const status = byId('backup-status');
+    status.textContent = '';
+    showError('backup-error', '');
+    try {
+      const result = await db.importData(parseBackup(await source.text()));
+      status.textContent = `Obnovené. Pridané: ${result.added}, aktualizované: `
+        + `${result.updated}, bez zmeny: ${result.unchanged}.`
+        + (result.settingsRestored ? ' Obnovené aj nastavenia.' : '');
+      await show();
+    } catch (error) {
+      console.warn('Obnova zlyhala:', error);
+      showError('backup-error', `Obnova zlyhala, nič sa nezmenilo. ${error.message}`);
+    }
+  }
+
+  const report = (promise, message) => promise.catch((error) => {
+    console.error(error);
+    showToast(message);
+  });
+
+  for (const input of [from, to]) {
+    input.addEventListener('change', () => report(show(), 'Náhľad sa nepodarilo pripraviť.'));
+  }
+  byId('send-button').addEventListener('click',
+    () => report(send(), 'Odoslanie sa nepodarilo.'));
+  byId('send-copy-subject').addEventListener('click',
+    () => copy(draft.subject, 'Predmet skopírovaný'));
+  byId('send-copy-body').addEventListener('click',
+    () => copy(draft.body, 'Telo skopírované'));
+  byId('send-copy-all').addEventListener('click', async () => {
+    const { ids, body } = draft;
+    if (!(await copy(body, 'Skopírované do schránky'))) return;
+    await db.setPendingSend(ids);
+    // E-mail sa odosiela ručne, preto sa pýtame až po skutočnom návrate.
+    waitForReturn(null);
+  });
+  byId('backup-button').addEventListener('click',
+    () => report(backup(), 'Zálohu sa nepodarilo vytvoriť.'));
+  byId('restore-button').addEventListener('click', () => file.click());
+  file.addEventListener('change', () => {
+    const [source] = file.files;
+    if (source) report(restore(source), 'Obnova sa nepodarila.');
+    file.value = ''; // ten istý súbor sa dá vybrať znova
+  });
+
+  return { show, confirmSent };
+}
+
+/* ---------- Nastavenia ---------- */
+
+// V kroku 6 len adresa príjemcu, ostatné nastavenia pribudnú v kroku 7.
+function createSettingsScreen(db) {
+  const email = byId('settings-email');
+
+  email.addEventListener('change', async () => {
+    email.value = email.value.trim();
+    if (!email.checkValidity()) {
+      showError('settings-error', 'Zadaj platnú e-mailovú adresu.');
+      return;
+    }
+    showError('settings-error', '');
+    try {
+      await db.saveSettings({ email: email.value });
+      showToast('Uložené');
+    } catch (error) {
+      console.error(error);
+      showError('settings-error', 'Nastavenie sa nepodarilo uložiť.');
+    }
+  });
+
+  async function show() {
+    const settings = await db.getSettings();
+    if (document.activeElement !== email) email.value = settings.email;
+    showError('settings-error', '');
+  }
+
+  return { show };
+}
+
 /* ---------- Karta ---------- */
 
 // Na karte sú značky pevné, nezávisia od nastavení zóny.
@@ -1002,12 +1312,19 @@ async function start() {
     const db = await openDatabase();
     screens.zapis = createEntryScreen(db);
     screens.zaznamy = createRecordsScreen(db);
+    // Po odoslaní obnovíme aktuálnu obrazovku bez posunu na začiatok.
+    screens.odoslat = createSendScreen(db, () => {
+      const { screen, id } = currentRoute();
+      screens[screen]?.show(id).catch((error) => console.error(error));
+    });
+    screens.nastavenia = createSettingsScreen(db);
     const { screen, id } = currentRoute();
     await screens[screen]?.show(id);
     // Zápis potrebuje predvyplniť, aj keď sa aplikácia otvorila na inej obrazovke.
     if (screen !== 'zapis') await screens.zapis.show(null);
-    byId('zapis-content').hidden = false;
-    byId('records-content').hidden = false;
+    for (const content of ['zapis-content', 'records-content', 'send-content', 'settings-content']) {
+      byId(content).hidden = false;
+    }
   } catch (error) {
     console.error('Databázu sa nepodarilo otvoriť:', error);
     showError('db-error', 'Databázu sa nepodarilo otvoriť. Zavri aplikáciu a skús to znova.');
@@ -1021,6 +1338,8 @@ async function start() {
   document.addEventListener('visibilitychange', tick);
 
   await showStorageStatus();
+  // Ak systém aplikáciu medzitým ukončil, otázka na odoslanie príde teraz.
+  await screens.odoslat.confirmSent();
 }
 
 // V test.html sa modul len importuje, aplikácia sa nespúšťa.

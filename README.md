@@ -35,6 +35,10 @@ Pravidlá nad rámec zadania:
 
 - `hladChut` je povinné, `tempo` môže byť `null`.
 - Zmena údajov odoslaného záznamu nastaví `odoslane` späť na `null`.
+- Dlhý export (`mailto:` nad 1 800 znakov) ide cez zdieľanie; adresa príjemcu sa
+  vtedy skopíruje do schránky.
+- Obnova zo zálohy zlúči záznamy podľa `id` (novší `upravene` vyhráva). Nastavenia
+  zo zálohy sa použijú, len ak sú v telefóne ešte predvolené.
 - „Posledných 7 dní“ je dnešok a 6 kalendárnych dní pred ním. Percento „V zóne“
   sa počíta len z jedál s vyplneným `po`.
 - Na stupnici zápisu nemá hodnota 1 polovicu. Zóna a STOP na nej sa riadia
