@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="sk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hedonist – testy</title>
+  <link rel="icon" type="image/png" href="./icons/icon-192.png">
+  <style>
+    body { margin: 16px; font: 16px/1.4 system-ui, sans-serif; color: #1a1a1a; background: #fff; }
+    h1 { font-size: 20px; }
+    #summary { font-weight: 700; }
+    ul { padding: 0; list-style: none; }
+    li { padding: 6px 0; border-bottom: 1px solid #e2e2e2; }
+    .ok::before { content: "OK  "; color: #1b6e20; font-weight: 700; white-space: pre; }
+    .fail { color: #b00020; }
+    .fail::before { content: "CHYBA  "; font-weight: 700; white-space: pre; }
+    pre { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
+  </style>
+  <script type="module" src="./tests.js"></script>
+</head>
+<body>
+  <h1>Hedonist – testy</h1>
+  <p id="summary" role="status">Testy bežia…</p>
+  <p>Testy používajú vlastnú dočasnú databázu, tvojich záznamov sa nedotknú.</p>
+  <ul id="results"></ul>
+</body>
+</html>

@@ -1,5 +1,7 @@
 // Hedonist – logika aplikácie a prepínanie obrazoviek.
 
+import { ensurePersistentStorage, openDatabase } from './db.js';
+
 const SCREENS = ['zapis', 'karta', 'zaznamy', 'odoslat', 'nastavenia'];
 
 function showScreen() {
@@ -64,8 +66,24 @@ async function showOfflineStatus() {
   registration.active.postMessage({ type: 'GET_VERSION' }, [channel.port2]);
 }
 
+async function initStorage() {
+  const db = await openDatabase();
+  const persistent = await ensurePersistentStorage();
+
+  // Dočasná kontrola (krok 2): stav databázy a trvalého úložiska.
+  const records = await db.getAllRecords();
+  const state = { true: 'trvalé', false: 'zatiaľ nie je trvalé', null: 'trvalosť nepodporovaná' };
+  document.getElementById('check-storage').textContent =
+    `Databáza pripravená · záznamov: ${records.length} · úložisko: ${state[persistent]}`;
+}
+
 window.addEventListener('hashchange', showScreen);
 showScreen();
+
+initStorage().catch((error) => {
+  console.error('Databázu sa nepodarilo otvoriť:', error);
+  document.getElementById('check-storage').textContent = 'Databázu sa nepodarilo otvoriť.';
+});
 
 if ('serviceWorker' in navigator) {
   registerServiceWorker().catch((error) => {

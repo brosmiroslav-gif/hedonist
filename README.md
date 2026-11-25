@@ -16,6 +16,26 @@ python -m http.server 8000
 Potom otvor `http://localhost:8000` (nie IP adresu – service worker vyžaduje HTTPS alebo `localhost`).
 Nie je potrebný žiadny build ani inštalácia závislostí.
 
+## Testy
+
+Otvor `http://localhost:8000/test.html` (alebo `test.html` na adrese aplikácie).
+Testy dátovej vrstvy bežia priamo v prehliadači a používajú vlastnú dočasnú databázu.
+Ak je aplikácia v prehliadači už otvorená, najprv ju aktualizuj tlačidlom „Obnoviť“,
+inak testy dostanú starý `db.js` z cache.
+
+## Dáta
+
+IndexedDB `hedonist`, object stores `zaznamy` a `nastavenia`. Záznam má polia podľa
+sekcie 2 zadania a navyše:
+
+- `poZapisane` – ISO čas prvého zápisu `po` (inak `null`). Slúži pre pripomienku
+  po 20 minútach; do CSV v e-maile nepatrí.
+
+Pravidlá nad rámec zadania:
+
+- `hladChut` je povinné, `tempo` môže byť `null`.
+- Zmena údajov odoslaného záznamu nastaví `odoslane` späť na `null`.
+
 ## Nová verzia (cache)
 
 Aplikácia sa servíruje z cache service workera. **Pri každej zmene súborov zvýš
