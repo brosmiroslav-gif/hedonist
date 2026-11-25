@@ -7,7 +7,7 @@ import {
 import {
   dayLabel, defaultMeal, formatAverage, formatCountdown, formatScore, formatValues, groupByDay,
   halfScore, localDateTime, pendingLabel, pendingRecords, remainingMs, scaleMarks, shiftDate,
-  selectForSending, tapScore, weekSummary, zoneResult,
+  selectForSending, tapScore, upcomingReminders, weekSummary, zoneProblem, zoneResult,
 } from './app.js';
 import {
   backupFileName, createBackup, emailBody, emailSubject, mailtoUrl, parseBackup,
@@ -641,6 +641,48 @@ dbTest('rozrobené odoslanie prežije zatvorenie aplikácie', async ({ db, open 
   await again.setPendingSend(null);
   assertEqual(await again.getPendingSend(), null);
   assertEqual(await again.getSettings(), { ...DEFAULT_SETTINGS });
+});
+
+/* ---------- Nastavenia a pripomienky ---------- */
+
+test('zóna: od ≤ do < STOP', () => {
+  const ok = (startOd, startDo, stop) => zoneProblem({ startOd, startDo, stop }) === '';
+  assertEqual([ok(3, 4, 6), ok(4, 4, 4.5), ok(1, 9.5, 10)], [true, true, true]);
+  assertEqual([ok(4.5, 4, 6), ok(3, 4, 4), ok(3, 6, 5)], [false, false, false]);
+  assertEqual(zoneProblem(DEFAULT_SETTINGS), '');
+});
+
+test('pripomienky čakajú len na jedlá s po bez po20, ktorým neuplynulo 20 minút', () => {
+  const poZapisane = '2026-11-25T10:50:00.000Z';
+  const records = [
+    stored({ id: 'čaká', po: 7, poZapisane }),
+    stored({ id: 'bez-po' }),
+    stored({ id: 'hotové', po: 7, po20: 6, poZapisane }),
+    stored({ id: 'uplynulo', po: 7, poZapisane: '2026-11-25T10:40:00.000Z' }),
+  ];
+  assertEqual(upcomingReminders(records, NOON), [{
+    id: 'čaká',
+    at: Date.parse('2026-11-25T11:10:00.000Z'),
+    body: 'Obed 12:00 · pred 3,5',
+  }]);
+});
+
+dbTest('databáza ohlási každú zmenu záznamov', async ({ dbName }) => {
+  let changes = 0;
+  const db = await openDatabase(dbName, { onChange: () => { changes += 1; } });
+  try {
+    const { id } = await db.addRecord(meal());
+    await db.updateRecord(id, { po: 7 });
+    await db.importData({ records: [], settings: null });
+    await db.deleteRecord(id);
+    assertEqual(changes, 4);
+    await db.getAllRecords();
+    await assertRejects(() => db.addRecord(meal({ pred: 0 })));
+    await assertRejects(() => db.updateRecord('neexistuje', { po: 5 }));
+    assertEqual(changes, 4);
+  } finally {
+    db.close();
+  }
 });
 
 /* ---------- Spustenie ---------- */

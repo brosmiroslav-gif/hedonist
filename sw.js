@@ -1,7 +1,7 @@
 // Hedonist – service worker (cache-first).
 // Pri KAŽDEJ zmene súborov zvýš CACHE_VERSION a nové súbory pridaj do ASSETS.
 
-const CACHE_VERSION = 'v6';
+const CACHE_VERSION = 'v7';
 
 // Doména github.io je spoločná pre všetky projekty, preto vlastný prefix.
 const CACHE_PREFIX = 'hedonist-';
@@ -45,9 +45,58 @@ self.addEventListener('activate', (event) => {
   })());
 });
 
+/* ---------- Pripomienka po 20 minútach (best effort) ---------- */
+
+// Prehliadač môže nečinný service worker kedykoľvek ukončiť a časovač zanikne.
+const reminders = new Map(); // id → { timer, resolve }
+
+function cancelReminder(id) {
+  const reminder = reminders.get(id);
+  if (!reminder) return;
+  clearTimeout(reminder.timer);
+  reminders.delete(id);
+  reminder.resolve();
+}
+
+function scheduleReminder({ id, at, title, options }) {
+  cancelReminder(id);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      reminders.delete(id);
+      resolve(self.registration.showNotification(title, options));
+    }, Math.max(0, at - Date.now()));
+    reminders.set(id, { timer, resolve });
+  });
+}
+
 self.addEventListener('message', (event) => {
-  if (event.data?.type === 'SKIP_WAITING') self.skipWaiting();
-  if (event.data?.type === 'GET_VERSION') event.ports[0].postMessage(CACHE_VERSION);
+  const { type, id } = event.data ?? {};
+  if (type === 'SKIP_WAITING') self.skipWaiting();
+  if (type === 'GET_VERSION') event.ports[0].postMessage(CACHE_VERSION);
+  if (type === 'REMIND') event.waitUntil(scheduleReminder(event.data));
+  if (type === 'CANCEL') cancelReminder(id);
+  if (type === 'CANCEL_ALL') [...reminders.keys()].forEach(cancelReminder);
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const id = event.notification.data?.id;
+  if (!id) return;
+
+  event.waitUntil((async () => {
+    const { scope } = self.registration;
+    const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    const app = windows.find(({ url }) => {
+      const address = url.split(/[?#]/)[0];
+      return address === scope || address === `${scope}index.html`;
+    });
+    if (app) {
+      app.postMessage({ type: 'OPEN', id });
+      await app.focus();
+    } else {
+      await self.clients.openWindow(`${scope}#doplnit-${id}`);
+    }
+  })());
 });
 
 self.addEventListener('fetch', (event) => {

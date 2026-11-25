@@ -4,7 +4,8 @@ import {
   DEFAULT_SETTINGS, HLAD_CHUT, JEDLA, TEMPA, ensurePersistentStorage, openDatabase,
 } from './db.js';
 import {
-  MAILTO_LIMIT, backupFileName, createBackup, emailBody, emailSubject, mailtoUrl, parseBackup,
+  APP_VERSION, MAILTO_LIMIT, backupFileName, createBackup, emailBody, emailSubject, mailtoUrl,
+  parseBackup,
 } from './export.js';
 
 const SCREENS = ['zapis', 'karta', 'zaznamy', 'odoslat', 'nastavenia'];
@@ -110,6 +111,24 @@ export function pendingRecords(records, now = new Date()) {
 export function remainingMs(record, now = new Date()) {
   if (record.po === null || !record.poZapisane) return null;
   return Math.max(0, Date.parse(record.poZapisane) + PO20_DELAY_MS - now.getTime());
+}
+
+/** Pripomienky na zápis po20, ktoré ešte len majú prísť. */
+export function upcomingReminders(records, now = new Date()) {
+  return records
+    .filter((record) => record.po20 === null && remainingMs(record, now) > 0)
+    .map((record) => ({
+      id: record.id,
+      at: Date.parse(record.poZapisane) + PO20_DELAY_MS,
+      body: mealSummary(record),
+    }));
+}
+
+/** Prečo sa zóna nedá uložiť; prázdny text = je v poriadku. */
+export function zoneProblem({ startOd, startDo, stop }) {
+  if (startOd > startDo) return '„Začať od“ nesmie byť viac ako „Začať do“.';
+  if (stop <= startDo) return 'STOP musí byť viac ako „Začať do“.';
+  return '';
 }
 
 export function formatCountdown(ms) {
@@ -1106,11 +1125,135 @@ function createSendScreen(db, onSent) {
   return { show, confirmSent };
 }
 
+/* ---------- Pripomienka po 20 minútach (best effort) ---------- */
+
+const notificationsSupported = () => 'Notification' in window && 'serviceWorker' in navigator;
+
+/**
+ * Pripomienku plánuje stránka aj service worker. Android môže oboje uspať,
+ * preto je hlavnou poistkou zvýraznená karta na obrazovke Zápis. Rovnaký
+ * `tag` zaručí, že sa neukážu dve notifikácie.
+ */
+function createReminders(db) {
+  const timers = new Map(); // id → { at, handle }
+  let queue = Promise.resolve();
+
+  const notification = ({ id, body }) => ({
+    title: 'Teraz: po 20 min',
+    options: {
+      body, tag: `po20-${id}`, data: { id }, lang: 'sk', icon: './icons/icon-192.png',
+    },
+  });
+
+  async function fire(reminder) {
+    const record = await db.getRecord(reminder.id);
+    if (!record || record.po20 !== null) return;
+    const registration = await navigator.serviceWorker.ready;
+    const { title, options } = notification(reminder);
+    await registration.showNotification(title, options);
+  }
+
+  async function update() {
+    const allowed = notificationsSupported() && Notification.permission === 'granted';
+    if (!allowed) return;
+
+    const records = await db.getAllRecords();
+    const wanted = new Map(upcomingReminders(records).map((item) => [item.id, item]));
+    const registration = await navigator.serviceWorker.ready;
+    const send = (message) => registration.active.postMessage(message);
+
+    for (const [id, timer] of timers) {
+      if (wanted.get(id)?.at === timer.at) continue;
+      clearTimeout(timer.handle);
+      timers.delete(id);
+      // Uplynutý čas neruší service worker, ten môže notifikáciu práve zobrazovať.
+      if (timer.at > Date.now() || !records.some((record) => record.id === id)) {
+        send({ type: 'CANCEL', id });
+      }
+    }
+    for (const reminder of wanted.values()) {
+      if (!timers.has(reminder.id)) {
+        const handle = setTimeout(() => {
+          fire(reminder).catch((error) => console.warn('Pripomienka zlyhala:', error));
+        }, reminder.at - Date.now());
+        timers.set(reminder.id, { at: reminder.at, handle });
+      }
+      // Service worker mohol byť medzitým ukončený, preto posielame vždy.
+      send({ type: 'REMIND', id: reminder.id, at: reminder.at, ...notification(reminder) });
+    }
+
+    // Zatvoríme upozornenia na jedlá, ktoré sú už doplnené alebo zmazané.
+    for (const shown of await registration.getNotifications()) {
+      const record = records.find((item) => item.id === shown.data?.id);
+      if (!record || record.po === null || record.po20 !== null) shown.close();
+    }
+  }
+
+  /** Zosúladí naplánované pripomienky so záznamami. */
+  function sync() {
+    queue = queue.then(update)
+      .catch((error) => console.warn('Pripomienky sa nepodarilo naplánovať:', error));
+    return queue;
+  }
+
+  return { sync };
+}
+
 /* ---------- Nastavenia ---------- */
 
-// V kroku 6 len adresa príjemcu, ostatné nastavenia pribudnú v kroku 7.
-function createSettingsScreen(db) {
+function createSettingsScreen(db, reminders) {
   const email = byId('settings-email');
+  const zone = {
+    startOd: byId('settings-start-from'),
+    startDo: byId('settings-start-to'),
+    stop: byId('settings-stop'),
+  };
+  const enable = byId('reminder-enable');
+
+  const scores = Array.from({ length: 19 }, (_, i) => 1 + i / 2);
+  for (const select of Object.values(zone)) {
+    select.append(...scores.map((score) => new Option(formatScore(score), score)));
+    select.addEventListener('change', async () => {
+      const values = Object.fromEntries(
+        Object.entries(zone).map(([key, field]) => [key, Number(field.value)]));
+      const problem = zoneProblem(values);
+      showError('settings-zone-error', problem ? `${problem} Zmena zatiaľ nie je uložená.` : '');
+      if (problem) return;
+      try {
+        await db.saveSettings(values);
+        showToast('Uložené');
+      } catch (error) {
+        console.error(error);
+        showError('settings-zone-error', 'Nastavenie sa nepodarilo uložiť.');
+      }
+    });
+  }
+
+  function showReminderState() {
+    const state = notificationsSupported() ? Notification.permission : 'unsupported';
+    byId('reminder-status').textContent = {
+      default: 'Pripomienky nie sú povolené.',
+      granted: 'Pripomienky sú povolené. Vypneš ich v nastaveniach telefónu.',
+      denied: 'Notifikácie sú zablokované. Povoľ ich v nastaveniach prehliadača alebo telefónu.',
+      unsupported: 'Tento prehliadač notifikácie nepodporuje.',
+    }[state];
+    enable.hidden = state !== 'default';
+  }
+
+  enable.addEventListener('click', async () => {
+    await Notification.requestPermission();
+    showReminderState();
+    await reminders.sync();
+  });
+
+  async function showStorageState() {
+    const persistent = await ensurePersistentStorage();
+    byId('storage-status').textContent = {
+      true: 'trvalé',
+      false: 'nie je trvalé – systém môže dáta pri nedostatku miesta zmazať',
+      null: 'trvalosť sa nedá zistiť',
+    }[persistent];
+  }
 
   email.addEventListener('change', async () => {
     email.value = email.value.trim();
@@ -1131,7 +1274,11 @@ function createSettingsScreen(db) {
   async function show() {
     const settings = await db.getSettings();
     if (document.activeElement !== email) email.value = settings.email;
+    for (const [key, select] of Object.entries(zone)) select.value = settings[key];
     showError('settings-error', '');
+    showError('settings-zone-error', '');
+    showReminderState();
+    await showStorageState();
   }
 
   return { show };
@@ -1244,6 +1391,8 @@ async function registerServiceWorker() {
   byId('update-button').addEventListener('click', () => {
     if (registration.waiting) {
       updateRequested = true;
+      // Čakajúce pripomienky by zdržali výmenu verzie; po obnovení sa naplánujú znova.
+      registration.active?.postMessage({ type: 'CANCEL_ALL' });
       registration.waiting.postMessage({ type: 'SKIP_WAITING' });
     } else {
       location.reload();
@@ -1265,22 +1414,15 @@ async function registerServiceWorker() {
   registration.addEventListener('updatefound', () => watch(registration.installing));
 }
 
-// Dočasná kontrola: ukáže, že súbory sú v cache a v akej verzii.
+/** V Nastaveniach ukáže, že súbory sú v cache, a jej verziu. */
 async function showOfflineStatus() {
-  const output = byId('check-offline');
   const registration = await navigator.serviceWorker.ready;
   const channel = new MessageChannel();
   channel.port1.onmessage = (event) => {
-    output.textContent = `Offline pripravené · cache ${event.data}`;
+    byId('offline-status').textContent = 'pripravené';
+    byId('app-version').textContent = `${APP_VERSION} (cache ${event.data})`;
   };
   registration.active.postMessage({ type: 'GET_VERSION' }, [channel.port2]);
-}
-
-// Dočasná kontrola: stav trvalého úložiska.
-async function showStorageStatus() {
-  const persistent = await ensurePersistentStorage();
-  const state = { true: 'trvalé', false: 'zatiaľ nie je trvalé', null: 'trvalosť nepodporovaná' };
-  byId('check-storage').textContent = `Úložisko: ${state[persistent]}`;
 }
 
 /* ---------- Spustenie ---------- */
@@ -1297,19 +1439,27 @@ async function start() {
   window.addEventListener('hashchange', route);
   route();
   initCard();
+  byId('app-version').textContent = APP_VERSION;
 
   if ('serviceWorker' in navigator) {
     registerServiceWorker().catch((error) => {
       console.error('Registrácia service workera zlyhala:', error);
-      byId('check-offline').textContent = 'Offline režim sa nepodarilo pripraviť.';
+      byId('offline-status').textContent = 'nepodarilo sa pripraviť';
     });
     showOfflineStatus();
+    // Ťuknutie na notifikáciu otvorí doplnenie daného jedla.
+    navigator.serviceWorker.addEventListener('message', (event) => {
+      if (event.data?.type === 'OPEN') location.hash = `#${AFTER_PREFIX}${event.data.id}`;
+    });
+    navigator.serviceWorker.startMessages();
   } else {
-    byId('check-offline').textContent = 'Tento prehliadač nepodporuje offline režim.';
+    byId('offline-status').textContent = 'tento prehliadač ho nepodporuje';
   }
 
+  let reminders = null;
   try {
-    const db = await openDatabase();
+    const db = await openDatabase(undefined, { onChange: () => reminders?.sync() });
+    reminders = createReminders(db);
     screens.zapis = createEntryScreen(db);
     screens.zaznamy = createRecordsScreen(db);
     // Po odoslaní obnovíme aktuálnu obrazovku bez posunu na začiatok.
@@ -1317,7 +1467,7 @@ async function start() {
       const { screen, id } = currentRoute();
       screens[screen]?.show(id).catch((error) => console.error(error));
     });
-    screens.nastavenia = createSettingsScreen(db);
+    screens.nastavenia = createSettingsScreen(db, reminders);
     const { screen, id } = currentRoute();
     await screens[screen]?.show(id);
     // Zápis potrebuje predvyplniť, aj keď sa aplikácia otvorila na inej obrazovke.
@@ -1335,9 +1485,15 @@ async function start() {
     if (!document.hidden && currentRoute().screen === 'zapis') screens.zapis.tick();
   };
   setInterval(tick, 1000);
-  document.addEventListener('visibilitychange', tick);
+  document.addEventListener('visibilitychange', () => {
+    tick();
+    // Po uspaní treba pripomienky naplánovať znova.
+    if (!document.hidden) reminders.sync();
+  });
 
-  await showStorageStatus();
+  reminders.sync();
+  // O trvalé úložisko žiadame pri každom spustení, kým ho nedostaneme.
+  await ensurePersistentStorage();
   // Ak systém aplikáciu medzitým ukončil, otázka na odoslanie príde teraz.
   await screens.odoslat.confirmSent();
 }

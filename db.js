@@ -185,16 +185,21 @@ function transact(connection, storeNames, mode, work) {
 }
 
 /**
- * Otvorí databázu a vráti operácie nad ňou.
- * Parametre sú určené pre testy: iný názov databázy a vlastné hodiny.
+ * Otvorí databázu a vráti operácie nad ňou. `onChange` sa zavolá po každej
+ * zmene záznamov. Iný názov databázy a vlastné hodiny sú určené pre testy.
  */
-export async function openDatabase(name = DB_NAME, { now = () => new Date() } = {}) {
+export async function openDatabase(name = DB_NAME, { now = () => new Date(), onChange } = {}) {
   const connection = await openConnection(name);
   // Ak sa v budúcnosti otvorí novšia verzia databázy, neblokujeme ju.
   connection.onversionchange = () => connection.close();
 
   const run = (storeName, mode, work) => transact(connection, storeName, mode, work);
   const timestamp = () => now().toISOString();
+  const changing = async (operation) => {
+    const result = await operation;
+    onChange?.();
+    return result;
+  };
 
   return {
     /** Vytvorí nový záznam a vráti ho. */
@@ -214,10 +219,10 @@ export async function openDatabase(name = DB_NAME, { now = () => new Date() } = 
       validate(record, RECORD_RULES);
       record.poZapisane = record.po === null ? null : time;
 
-      return run(RECORDS, 'readwrite', (store, done) => {
+      return changing(run(RECORDS, 'readwrite', (store, done) => {
         store.add(record);
         done(record);
-      });
+      }));
     },
 
     /**
@@ -225,7 +230,7 @@ export async function openDatabase(name = DB_NAME, { now = () => new Date() } = 
      * vráti medzi neodoslané. `poZapisane` je čas prvého zápisu `po`.
      */
     updateRecord(id, changes) {
-      return run(RECORDS, 'readwrite', (store, done, guard) => {
+      return changing(run(RECORDS, 'readwrite', (store, done, guard) => {
         const request = store.get(id);
         request.onsuccess = guard(() => {
           const current = request.result;
@@ -246,7 +251,7 @@ export async function openDatabase(name = DB_NAME, { now = () => new Date() } = 
           store.put(next);
           done(next);
         });
-      });
+      }));
     },
 
     /** Vráti záznam alebo `undefined`. */
@@ -267,9 +272,9 @@ export async function openDatabase(name = DB_NAME, { now = () => new Date() } = 
     },
 
     deleteRecord(id) {
-      return run(RECORDS, 'readwrite', (store) => {
+      return changing(run(RECORDS, 'readwrite', (store) => {
         store.delete(id);
-      });
+      }));
     },
 
     /** Označí záznamy ako odoslané. `upravene` sa nemení – údaje sú rovnaké. */
@@ -335,7 +340,7 @@ export async function openDatabase(name = DB_NAME, { now = () => new Date() } = 
       const incoming = records.map(importedRecord);
       const restored = settings ? importedSettings(settings) : null;
 
-      return run([RECORDS, SETTINGS], 'readwrite', (store, done, guard, transaction) => {
+      return changing(run([RECORDS, SETTINGS], 'readwrite', (store, done, guard, transaction) => {
         const result = { added: 0, updated: 0, unchanged: 0, settingsRestored: false };
         done(result);
 
@@ -365,7 +370,7 @@ export async function openDatabase(name = DB_NAME, { now = () => new Date() } = 
           });
         };
         mergeFrom(0);
-      });
+      }));
     },
 
     close() {

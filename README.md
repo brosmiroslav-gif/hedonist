@@ -44,6 +44,12 @@ Pravidlá nad rámec zadania:
 - Na stupnici zápisu nemá hodnota 1 polovicu. Zóna a STOP na nej sa riadia
   nastaveniami, karta je pevná.
 
+## Pripomienka po 20 minútach
+
+Povoľuje sa v Nastaveniach. Je len **„best effort“**: Android môže uspatú PWA
+aj jej service worker zastaviť, a notifikácia potom nepríde alebo príde neskôr.
+Hlavná poistka je zvýraznená karta **„Teraz: po 20 min“** na obrazovke Zápis.
+
 ## Nová verzia (cache)
 
 Aplikácia sa servíruje z cache service workera. **Pri každej zmene súborov zvýš

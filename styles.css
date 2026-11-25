@@ -45,10 +45,29 @@
   --stop-bg: #1a1a1a;
   --stop-text: #ffffff;
   --stop-label: #ffb48a;
+  --on-accent: #ffffff;
 
   --font-text: "Plex Condensed", sans-serif;
   --font-mono: "Plex Mono", monospace;
   --touch: 48px;
+}
+
+/* Tmavý režim podľa systému; STOP riadok je invertovaný (svetlý). */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+
+    --bg: #121212;
+    --text: #ececec;
+    --text-secondary: #b0b0b0;
+    --line: #2e2e2e;
+    --accent: #ff9a66;
+    --zone: #3a2418;
+    --stop-bg: #ececec;
+    --stop-text: #121212;
+    --stop-label: #b03a0a;
+    --on-accent: #121212;
+  }
 }
 
 /* ---------- Základ ---------- */
@@ -511,6 +530,7 @@ svg {
 }
 
 input,
+select,
 textarea {
   width: 100%;
   min-height: var(--touch);
@@ -584,7 +604,7 @@ textarea {
   place-items: center;
   margin: 3px 0;
   background: var(--accent);
-  color: #ffffff;
+  color: var(--on-accent);
 }
 
 .scale-pick button:focus-visible {
@@ -789,7 +809,7 @@ details[open] summary::before {
   justify-content: flex-end;
   padding-right: 20px;
   background: var(--accent);
-  color: #ffffff;
+  color: var(--on-accent);
   font-weight: 600;
   visibility: hidden;
 }
@@ -949,9 +969,59 @@ details[open] summary::before {
   flex: 1;
 }
 
-/* ---------- Dočasná kontrola ---------- */
+/* ---------- Nastavenia ---------- */
 
-.check p {
-  padding: 8px 0;
+.zone-settings {
+  margin-top: 20px !important;
+}
+
+.zone-fields {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.zone-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.zone-fields select {
+  font-family: var(--font-mono);
+}
+
+.zone-settings .form-error {
+  margin-top: 8px;
+}
+
+.form-screen h3:not(:first-child) {
+  margin-top: 8px;
+}
+
+.reminder-hint {
+  margin-top: 8px;
+  margin-bottom: 16px;
+}
+
+.about {
+  margin: 0;
+  border-top: 1px solid var(--line);
+}
+
+.about > div {
+  display: grid;
+  grid-template-columns: 7.5rem 1fr;
+  gap: 8px;
+  padding: 10px 0;
   border-bottom: 1px solid var(--line);
+}
+
+.about dt {
+  color: var(--text-secondary);
+}
+
+.about dd {
+  margin: 0;
 }

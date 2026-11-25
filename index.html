@@ -6,7 +6,9 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
   <title>Hedonist</title>
   <meta name="description" content="Záznamník hladu a sýtosti, funguje offline.">
-  <meta name="theme-color" content="#ffffff">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#121212" media="(prefers-color-scheme: dark)">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="icon" type="image/png" href="./icons/icon-192.png">
   <link rel="stylesheet" href="./styles.css">
@@ -288,12 +290,28 @@
           <input type="email" id="settings-email" autocomplete="email" autocapitalize="off" spellcheck="false">
         </label>
         <p class="form-error" id="settings-error" role="alert" hidden></p>
-      </div>
 
-      <!-- Dočasná kontrola offline režimu a úložiska, v kroku 7 ju nahradia nastavenia. -->
-      <div class="check">
-        <p id="check-offline" role="status">Pripravujem offline režim…</p>
-        <p id="check-storage" role="status">Zisťujem stav úložiska…</p>
+        <fieldset class="zone-settings">
+          <legend>Zóna</legend>
+          <div class="zone-fields">
+            <label>Začať od <select id="settings-start-from"></select></label>
+            <label>Začať do <select id="settings-start-to"></select></label>
+            <label>STOP <select id="settings-stop"></select></label>
+          </div>
+          <p class="form-error" id="settings-zone-error" role="alert" hidden></p>
+        </fieldset>
+
+        <h3>Pripomienka po 20 minútach</h3>
+        <p id="reminder-status" role="status"></p>
+        <button type="button" class="secondary wide" id="reminder-enable" hidden>Povoliť pripomienky</button>
+        <p class="hint reminder-hint">Android môže aplikáciu uspať a notifikácia potom nepríde. Spoľahni sa na kartu „Teraz: po 20 min“ na obrazovke Zápis.</p>
+
+        <h3>Aplikácia</h3>
+        <dl class="about">
+          <div><dt>Úložisko</dt><dd id="storage-status">zisťujem…</dd></div>
+          <div><dt>Offline režim</dt><dd id="offline-status">pripravujem…</dd></div>
+          <div><dt>Verzia</dt><dd id="app-version"></dd></div>
+        </dl>
       </div>
     </section>
   </main>
