@@ -35,20 +35,67 @@
     <section data-screen="zapis">
       <h2>Zápis</h2>
 
-      <!-- Dočasná kontrola fontov a offline režimu (krok 1), neskôr sa odstráni. -->
+      <!-- Dočasná kontrola offline režimu a databázy, neskôr sa odstráni. -->
       <div class="check">
-        <p class="check-400">400 · ľščťžýáíéúäôňĺŕď ĽŠČŤŽÝÁÍÉ ↔ →</p>
-        <p class="check-600">600 · ľščťžýáíéúäôňĺŕď ĽŠČŤŽÝÁÍÉ ↔ →</p>
-        <p class="check-700">700 · ľščťžýáíéúäôňĺŕď ĽŠČŤŽÝÁÍÉ ↔ →</p>
-        <p class="check-mono-500">Mono 500 · 0123456789 STOP ZAČNI</p>
-        <p class="check-mono-600">Mono 600 · 0123456789 STOP ZAČNI</p>
         <p id="check-offline" role="status">Pripravujem offline režim…</p>
         <p id="check-storage" role="status">Otváram databázu…</p>
       </div>
     </section>
 
-    <section data-screen="karta" hidden>
-      <h2>Karta</h2>
+    <section data-screen="karta" class="card" hidden>
+      <h2 class="visually-hidden">Karta</h2>
+
+      <div class="tabs" role="tablist" aria-label="Strana karty">
+        <button type="button" role="tab" id="tab-front" aria-controls="card-front" aria-selected="true">Predná</button>
+        <button type="button" role="tab" id="tab-back" aria-controls="card-back" aria-selected="false" tabindex="-1">Zadná</button>
+      </div>
+
+      <div role="tabpanel" id="card-front" aria-labelledby="tab-front">
+        <h3>Hlad ↔ sýtosť</h3>
+        <p class="card-subtitle">Ohodnoť sa: pred jedlom · v polovici · 20 min po</p>
+        <ul class="scale" id="card-scale"></ul>
+        <p class="card-motto">Začni pri 3–4. Prestaň pri 6 — za 20 minút sa to dotiahne na 7.</p>
+      </div>
+
+      <div role="tabpanel" id="card-back" aria-labelledby="tab-back" hidden>
+        <h3>Pred · počas · po</h3>
+        <dl class="phases">
+          <div>
+            <dt>PRED</dt>
+            <dd><strong>Hlad, alebo chuť?</strong> Zjedol by som teraz aj obyčajný chlieb? Áno → hlad. Chcem len to jedno → chuť (stres, únava, nuda, zvyk). Pri 1–2 začni bielkovinou a zeleninou.</dd>
+          </div>
+          <div>
+            <dt>POČAS</dt>
+            <dd><strong>V polovici taniera zlož príbor.</strong> Nádych, číslo. Jedz pomaly — signál sýtosti mešká 10–20 minút.</dd>
+          </div>
+          <div>
+            <dt>PO</dt>
+            <dd><strong>O 20 minút znova číslo.</strong> Zapíš: pred · po · po 20 min · hlad/chuť.</dd>
+          </div>
+        </dl>
+
+        <h4>Čo sýti (na kalóriu)</h4>
+        <ul class="satiety">
+          <li>
+            <p><strong>Najviac:</strong> mäso, ryby, vajcia, tvaroh, strukoviny, zelenina, vývar, varené zemiaky</p>
+            <span class="bar bar-1" aria-hidden="true"></span>
+          </li>
+          <li>
+            <p><strong>Stredne:</strong> celozrnné prílohy, ovocie, ovsené vločky</p>
+            <span class="bar bar-2" aria-hidden="true"></span>
+          </li>
+          <li>
+            <p><strong>Málo:</strong> biele pečivo, sladkosti, chipsy, ultraspracované</p>
+            <span class="bar bar-3" aria-hidden="true"></span>
+          </li>
+          <li>
+            <p><strong>Takmer nič:</strong> tekuté kalórie — džús, sladené nápoje, pivo aj nealko</p>
+            <span class="bar bar-4" aria-hidden="true"></span>
+          </li>
+        </ul>
+
+        <p class="sources">Blundell 2010 · Rolls 2007 · Holt 1995 · Robinson 2014 · Hall 2019</p>
+      </div>
     </section>
 
     <section data-screen="zaznamy" hidden>
