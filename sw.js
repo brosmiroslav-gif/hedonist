@@ -1,7 +1,7 @@
 // Hedonist – service worker (cache-first).
 // Pri KAŽDEJ zmene súborov zvýš CACHE_VERSION a nové súbory pridaj do ASSETS.
 
-const CACHE_VERSION = 'v7';
+const CACHE_VERSION = 'v8';
 
 // Doména github.io je spoločná pre všetky projekty, preto vlastný prefix.
 const CACHE_PREFIX = 'hedonist-';

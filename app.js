@@ -8,7 +8,7 @@ import {
   parseBackup,
 } from './export.js';
 
-const SCREENS = ['zapis', 'karta', 'zaznamy', 'odoslat', 'nastavenia'];
+const SCREENS = ['karta', 'zapis', 'zaznamy', 'odoslat', 'nastavenia']; // prvá je úvodná
 const AFTER_PREFIX = 'doplnit-'; // #doplnit-<id> = doplnenie po jedle
 const EDIT_PREFIX = 'upravit-'; // #upravit-<id> = úprava záznamu
 const SWIPE_DELETE_PX = 100; // o koľko treba riadok potiahnuť doľava

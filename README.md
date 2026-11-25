@@ -25,10 +25,13 @@ Potom funguje aj v režime lietadlo.
 
 ## Používanie
 
+Po spustení sa otvorí **Karta**. Poradie v menu je Karta · Zápis · Záznamy ·
+Odoslať (zmena oproti sekcii 3 zadania, kde je úvodný Zápis).
+
 | Obrazovka | Čo robí |
 |---|---|
+| **Karta** | Úvodná obrazovka: predná a zadná strana vreckovej karty, prepína sa záložkou alebo potiahnutím. |
 | **Zápis** | Nový záznam: ťuknutie na stupnici dá celé číslo, druhé ťuknutie alebo podržanie o pol menej (1 polovicu nemá). Povinné je „pred“ a „Hlad / chuť“. Hore sú rozpracované jedlá za posledných 6 hodín, ktorým chýba „po“ alebo „po 20 min“. |
-| **Karta** | Predná a zadná strana vreckovej karty, prepína sa záložkou alebo potiahnutím. |
 | **Záznamy** | Súhrn 7 dní a zoznam po dňoch. Ťuknutie = úprava, potiahnutie doľava = vymazanie s potvrdením. Oranžová bodka = neodoslané. |
 | **Odoslať** | Export e-mailom, záloha a obnova. |
 | **Nastavenia** | E-mail príjemcu, zóna a STOP, pripomienky, stav úložiska, verzia. |
@@ -124,7 +127,7 @@ podadrese `/hedonist/`. Súbor `.nojekyll` vypína spracovanie Jekyllom.
 Aplikácia sa servíruje z cache service workera (cache-first).
 
 1. **Pri každej zmene súborov zvýš `CACHE_VERSION` v [sw.js](sw.js)**
-   (napr. `v7` → `v8`). Bez toho telefón ostane na starej verzii.
+   (napr. `v8` → `v9`). Bez toho telefón ostane na starej verzii.
 2. Nový súbor pridaj do zoznamu `ASSETS` v tom istom súbore.
 3. Commit a `git push`.
 4. V telefóne otvor aplikáciu s internetom a ťukni na **„Obnoviť“** v lište
