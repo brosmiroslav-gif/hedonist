@@ -5,8 +5,9 @@ import {
   ensurePersistentStorage, openDatabase,
 } from './db.js';
 import {
-  defaultMeal, formatCountdown, formatScore, halfScore, localDateTime, pendingLabel,
-  pendingRecords, remainingMs, scaleMarks, tapScore,
+  dayLabel, defaultMeal, formatAverage, formatCountdown, formatScore, formatValues, groupByDay,
+  halfScore, localDateTime, pendingLabel, pendingRecords, remainingMs, scaleMarks, shiftDate,
+  tapScore, weekSummary, zoneResult,
 } from './app.js';
 
 /* ---------- Malý testovací rámec ---------- */
@@ -377,6 +378,58 @@ test('odpočet 20 minút sa počíta od poZapisane', () => {
 test('text karty rozpracovaného jedla', () => {
   assertEqual(pendingLabel(stored({ po: 7 })), 'Obed 12:00 · pred 3,5 · chýba: po 20 min');
   assertEqual(pendingLabel(stored({})), 'Obed 12:00 · pred 3,5 · chýba: po');
+});
+
+/* ---------- Záznamy: výpočty ---------- */
+
+test('V zóne: áno, nie, alebo nič bez po', () => {
+  const zone = (pred, po, settings = DEFAULT_SETTINGS) =>
+    zoneResult(stored({ pred, po }), settings);
+  assertEqual([zone(3, 6), zone(4, 5), zone(3.5, 6)], [true, true, true], 'v zóne');
+  assertEqual([zone(2.5, 6), zone(4.5, 6), zone(3, 6.5)], [false, false, false], 'mimo zóny');
+  assertEqual([zone(3, null), zone(9, null)], [null, null], 'bez po');
+  assertEqual(zone(5, 7, { startOd: 5, startDo: 5, stop: 7 }), true, 'iné nastavenia');
+});
+
+test('posun dátumu cez mesiac, rok aj priestupný deň', () => {
+  assertEqual([shiftDate('2026-12-02', -6), shiftDate('2027-01-03', -6), shiftDate('2028-03-01', -1)],
+    ['2026-11-26', '2026-12-28', '2028-02-29']);
+});
+
+test('súhrn berie dnešok a 6 dní pred ním', () => {
+  const records = [
+    stored({ datum: '2026-11-25', pred: 3, po: 6 }), // v zóne
+    stored({ datum: '2026-11-19', pred: 5, po: 8, hladChut: 'Chuť' }), // mimo zóny
+    stored({ datum: '2026-11-22', pred: 4, po: null, hladChut: 'Stres' }), // nevyhodnotené
+    stored({ datum: '2026-11-18', pred: 1, po: 10, hladChut: 'Chuť' }), // pred týždňom
+    stored({ datum: '2026-11-26', pred: 1, po: 10, hladChut: 'Chuť' }), // budúcnosť
+  ].map((record) => ({ hladChut: 'Hlad', ...record }));
+  assertEqual(weekSummary(records, DEFAULT_SETTINGS, NOON),
+    { count: 3, averageBefore: 4, averageAfter: 7, zonePercent: 50, notHunger: 2 });
+});
+
+test('súhrn bez údajov', () => {
+  assertEqual(weekSummary([], DEFAULT_SETTINGS, NOON),
+    { count: 0, averageBefore: null, averageAfter: null, zonePercent: null, notHunger: 0 });
+});
+
+test('formát priemeru a hodnôt', () => {
+  assertEqual([formatAverage(null), formatAverage(4), formatAverage(11 / 3)], ['–', '4,0', '3,7']);
+  assertEqual(formatValues(stored({ pred: 3.5, po: 7 })), '3,5 → 7 → –');
+});
+
+test('záznamy sú po dňoch, najnovšie hore', () => {
+  const records = [
+    stored({ id: 'a', datum: '2026-11-24', cas: '19:00' }),
+    stored({ id: 'b', datum: '2026-11-25', cas: '07:00' }),
+    stored({ id: 'c', datum: '2026-11-25', cas: '12:00' }),
+  ];
+  assertEqual(groupByDay(records).map(([day, items]) => [day, items.map((r) => r.id)]),
+    [['2026-11-25', ['c', 'b']], ['2026-11-24', ['a']]]);
+});
+
+test('nadpis dňa je po slovensky', () => {
+  assertEqual(dayLabel('2026-11-25'), 'Streda 25. 11. 2026');
 });
 
 /* ---------- Spustenie ---------- */

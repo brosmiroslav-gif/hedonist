@@ -35,6 +35,8 @@ Pravidlá nad rámec zadania:
 
 - `hladChut` je povinné, `tempo` môže byť `null`.
 - Zmena údajov odoslaného záznamu nastaví `odoslane` späť na `null`.
+- „Posledných 7 dní“ je dnešok a 6 kalendárnych dní pred ním. Percento „V zóne“
+  sa počíta len z jedál s vyplneným `po`.
 - Na stupnici zápisu nemá hodnota 1 polovicu. Zóna a STOP na nej sa riadia
   nastaveniami, karta je pevná.
 

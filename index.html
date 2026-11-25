@@ -32,7 +32,7 @@
   </div>
 
   <main class="main" id="main">
-    <section data-screen="zapis" class="entry">
+    <section data-screen="zapis" class="form-screen">
       <h2 class="visually-hidden">Zápis</h2>
       <p class="form-error" id="db-error" role="alert" hidden></p>
 
@@ -168,8 +168,73 @@
       </div>
     </section>
 
-    <section data-screen="zaznamy" hidden>
-      <h2>Záznamy</h2>
+    <section data-screen="zaznamy" class="form-screen" hidden>
+      <h2 class="visually-hidden">Záznamy</h2>
+
+      <div id="records-content" hidden>
+        <div id="list-view">
+          <div class="summary">
+            <h3>Posledných 7 dní</h3>
+            <dl>
+              <div><dt>Jedál</dt><dd id="sum-count"></dd></div>
+              <div><dt>Priemer pred</dt><dd id="sum-before"></dd></div>
+              <div><dt>Priemer po</dt><dd id="sum-after"></dd></div>
+              <div><dt>V zóne</dt><dd id="sum-zone"></dd></div>
+              <div><dt>Nie z hladu</dt><dd id="sum-not-hunger"></dd></div>
+            </dl>
+          </div>
+          <p class="hint" id="records-empty" hidden>Zatiaľ žiadne záznamy.</p>
+          <div id="records-list"></div>
+        </div>
+
+        <form id="edit-form" novalidate hidden>
+          <h3>Úprava záznamu</h3>
+
+          <div class="when">
+            <label>Dátum <input type="date" id="edit-date"></label>
+            <label>Čas <input type="time" id="edit-time"></label>
+          </div>
+
+          <fieldset>
+            <legend>Jedlo</legend>
+            <div class="chips" id="edit-meal"></div>
+          </fieldset>
+
+          <details id="edit-pred-box">
+            <summary id="edit-pred-label">Pred</summary>
+            <ol class="scale scale-pick" id="edit-pred"></ol>
+          </details>
+
+          <details id="edit-po-box">
+            <summary id="edit-po-label">Po</summary>
+            <ol class="scale scale-pick" id="edit-po"></ol>
+            <button type="button" class="secondary clear" id="edit-po-clear">Bez hodnoty</button>
+          </details>
+
+          <details id="edit-po20-box">
+            <summary id="edit-po20-label">Po 20 min</summary>
+            <ol class="scale scale-pick" id="edit-po20"></ol>
+            <button type="button" class="secondary clear" id="edit-po20-clear">Bez hodnoty</button>
+          </details>
+
+          <fieldset>
+            <legend>Hlad / chuť</legend>
+            <div class="chips" id="edit-hunger"></div>
+          </fieldset>
+
+          <fieldset>
+            <legend>Tempo</legend>
+            <div class="chips" id="edit-tempo"></div>
+          </fieldset>
+          <label class="note">Poznámka <textarea id="edit-note" rows="2"></textarea></label>
+
+          <div class="actions">
+            <p class="form-error" id="edit-error" role="alert" hidden></p>
+            <button type="button" class="secondary" id="edit-back">Späť</button>
+            <button type="submit" class="primary">Uložiť</button>
+          </div>
+        </form>
+      </div>
     </section>
 
     <section data-screen="odoslat" hidden>
@@ -188,6 +253,17 @@
   </main>
 
   <p class="toast" id="toast" role="status"></p>
+
+  <dialog class="dialog" id="dialog" aria-labelledby="dialog-title" aria-describedby="dialog-text">
+    <form method="dialog">
+      <h2 id="dialog-title"></h2>
+      <p id="dialog-text"></p>
+      <div class="dialog-actions">
+        <button class="secondary" id="dialog-no" value="no"></button>
+        <button class="primary" id="dialog-yes" value="yes"></button>
+      </div>
+    </form>
+  </dialog>
 
   <nav class="nav" aria-label="Hlavná navigácia">
     <a href="#zapis" data-link="zapis">

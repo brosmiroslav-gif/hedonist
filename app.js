@@ -6,6 +6,8 @@ import {
 
 const SCREENS = ['zapis', 'karta', 'zaznamy', 'odoslat', 'nastavenia'];
 const AFTER_PREFIX = 'doplnit-'; // #doplnit-<id> = doplnenie po jedle
+const EDIT_PREFIX = 'upravit-'; // #upravit-<id> = úprava záznamu
+const SWIPE_DELETE_PX = 100; // o koľko treba riadok potiahnuť doľava
 
 const TIME_ZONE = 'Europe/Bratislava';
 const PO20_DELAY_MS = 20 * 60 * 1000;
@@ -118,6 +120,70 @@ export function pendingLabel(record) {
   return `${mealSummary(record)} · chýba: ${record.po === null ? 'po' : 'po 20 min'}`;
 }
 
+/** „V zóne“: true / false, alebo `null`, kým chýba `po`. */
+export function zoneResult(record, { startOd, startDo, stop }) {
+  if (record.po === null) return null;
+  return record.pred >= startOd && record.pred <= startDo && record.po <= stop;
+}
+
+/** Posunie dátum `RRRR-MM-DD` o daný počet dní. */
+export function shiftDate(datum, days) {
+  const date = new Date(`${datum}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+/** Súhrn za posledných 7 dní: dnešok a 6 kalendárnych dní pred ním. */
+export function weekSummary(records, settings, now = new Date()) {
+  const today = localDateTime(now).datum;
+  const from = shiftDate(today, -6);
+  const week = records.filter(({ datum }) => datum >= from && datum <= today);
+  const average = (values) => (values.length
+    ? values.reduce((sum, value) => sum + value, 0) / values.length
+    : null);
+  // Percento sa počíta len z jedál, ktoré sa dajú vyhodnotiť.
+  const rated = week.map((record) => zoneResult(record, settings))
+    .filter((result) => result !== null);
+
+  return {
+    count: week.length,
+    averageBefore: average(week.map(({ pred }) => pred)),
+    averageAfter: average(week.map(({ po }) => po).filter((po) => po !== null)),
+    zonePercent: rated.length
+      ? Math.round((100 * rated.filter(Boolean).length) / rated.length)
+      : null,
+    notHunger: week.filter(({ hladChut }) => hladChut !== 'Hlad').length,
+  };
+}
+
+export function formatAverage(value) {
+  return value === null ? '–' : value.toFixed(1).replace('.', ',');
+}
+
+export function formatValues({ pred, po, po20 }) {
+  return [pred, po, po20].map((value) => (value === null ? '–' : formatScore(value))).join(' → ');
+}
+
+/** Záznamy po dňoch; najnovší deň aj najnovšie jedlo sú hore. */
+export function groupByDay(records) {
+  const sorted = [...records].sort((a, b) => wallMinutes(b) - wallMinutes(a));
+  const days = new Map();
+  for (const record of sorted) {
+    if (!days.has(record.datum)) days.set(record.datum, []);
+    days.get(record.datum).push(record);
+  }
+  return [...days];
+}
+
+const dayFormat = new Intl.DateTimeFormat('sk-SK', {
+  timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'numeric', year: 'numeric',
+});
+
+export function dayLabel(datum) {
+  const label = dayFormat.format(new Date(`${datum}T00:00:00Z`));
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
 /* ---------- Pomocné prvky ---------- */
 
 const byId = (id) => document.getElementById(id);
@@ -155,7 +221,7 @@ function createChips(container, options, { optional = false, onSelect } = {}) {
 }
 
 /** Zvislá stupnica 10 → 1 na výber hodnoty. */
-function createScalePicker(list) {
+function createScalePicker(list, { onChange } = {}) {
   let value = null;
 
   const rows = SCALE.map(({ value: row, name }) => {
@@ -210,6 +276,7 @@ function createScalePicker(list) {
       button.setAttribute('aria-pressed', String(selected));
       number.textContent = formatScore(selected ? value : row);
     }
+    onChange?.(value);
   }
 
   function setMarks(settings) {
@@ -240,6 +307,20 @@ function showError(id, message) {
   const output = byId(id);
   output.textContent = message;
   output.hidden = !message;
+}
+
+/** Potvrdzovací dialóg; vráti `true`, len ak používateľ potvrdí. */
+function askConfirm({ title, text, yes, no }) {
+  const dialog = byId('dialog');
+  byId('dialog-title').textContent = title;
+  byId('dialog-text').textContent = text;
+  byId('dialog-yes').textContent = yes;
+  byId('dialog-no').textContent = no;
+  dialog.returnValue = '';
+  dialog.showModal();
+  return new Promise((resolve) => {
+    dialog.addEventListener('close', () => resolve(dialog.returnValue === 'yes'), { once: true });
+  });
 }
 
 /* ---------- Zápis ---------- */
@@ -487,6 +568,265 @@ function createEntryScreen(db) {
   return { show, tick };
 }
 
+/* ---------- Záznamy ---------- */
+
+/** Potiahnutie riadku doľava (prstom aj myšou). */
+function addSwipeLeft(row, onSwipe) {
+  let start = null;
+  let offset = 0;
+  let dragging = false;
+  let dragged = false;
+
+  const move = (x) => {
+    offset = x;
+    row.style.transform = x ? `translateX(${x}px)` : '';
+    row.parentElement.classList.toggle('is-swiping', x < 0);
+  };
+  const finish = () => {
+    start = null;
+    dragging = false;
+    row.classList.remove('is-dragging');
+  };
+
+  row.draggable = false;
+  row.addEventListener('pointerdown', (event) => {
+    if (!event.isPrimary || event.button !== 0) return;
+    start = { x: event.clientX, y: event.clientY };
+    dragged = false;
+  });
+  row.addEventListener('pointermove', (event) => {
+    if (!start) return;
+    const dx = event.clientX - start.x;
+    const dy = event.clientY - start.y;
+    if (!dragging) {
+      if (Math.hypot(dx, dy) < 10) return;
+      if (dx > 0 || Math.abs(dx) < Math.abs(dy)) {
+        start = null; // iný smer – necháme stránku posúvať
+        return;
+      }
+      dragging = true;
+      dragged = true;
+      row.classList.add('is-dragging');
+      row.setPointerCapture(event.pointerId);
+    }
+    move(Math.min(0, dx));
+  });
+  row.addEventListener('pointerup', async () => {
+    const confirmed = dragging && -offset >= SWIPE_DELETE_PX;
+    finish();
+    if (confirmed) await onSwipe();
+    move(0);
+  });
+  row.addEventListener('pointercancel', () => {
+    finish();
+    move(0);
+  });
+  // Po potiahnutí sa nemá otvoriť úprava.
+  row.addEventListener('click', (event) => {
+    if (dragged && event.detail !== 0) event.preventDefault();
+    dragged = false;
+  });
+}
+
+function recordRow(record, settings) {
+  const link = element('a', 'record-row');
+  link.href = `#${EDIT_PREFIX}${record.id}`;
+  link.append(
+    element('span', 'record-time', record.cas), ' ',
+    element('span', 'record-meal', record.jedlo), ' ',
+    element('span', 'record-tag', record.hladChut), ' ',
+    element('span', 'record-values', formatValues(record)),
+  );
+  const zone = zoneResult(record, settings);
+  if (zone !== null) {
+    link.append(' ', element('span', zone ? 'record-zone is-in' : 'record-zone',
+      `V zóne: ${zone ? 'áno' : 'nie'}`));
+  }
+  if (record.odoslane === null) {
+    const dot = element('span', 'record-dot');
+    dot.append(element('span', 'visually-hidden', 'neodoslané'));
+    link.append(' ', dot);
+  }
+  return link;
+}
+
+/** Úprava jedného záznamu. */
+function createEditForm(db, onDone) {
+  const form = byId('edit-form');
+  const date = byId('edit-date');
+  const time = byId('edit-time');
+  const note = byId('edit-note');
+  const submit = form.querySelector('[type="submit"]');
+  const meal = createChips(byId('edit-meal'), JEDLA);
+  const hunger = createChips(byId('edit-hunger'), HLAD_CHUT);
+  const tempo = createChips(byId('edit-tempo'), TEMPA, { optional: true });
+
+  const scales = [['pred', 'Pred'], ['po', 'Po'], ['po20', 'Po 20 min']].map(([field, label]) => {
+    const picker = createScalePicker(byId(`edit-${field}`), {
+      onChange: (value) => {
+        byId(`edit-${field}-label`).textContent =
+          `${label}: ${value === null ? '–' : formatScore(value)}`;
+      },
+    });
+    byId(`edit-${field}-clear`)?.addEventListener('click', () => picker.set(null));
+    return { field, picker };
+  });
+
+  let id = null;
+
+  function open(record) {
+    // Pri opätovnom zobrazení toho istého záznamu rozpísané zmeny nemažeme.
+    if (record.id === id) return;
+    id = record.id;
+    date.value = record.datum;
+    time.value = record.cas;
+    meal.set(record.jedlo);
+    hunger.set(record.hladChut);
+    tempo.set(record.tempo);
+    note.value = record.poznamka;
+    for (const { field, picker } of scales) {
+      picker.set(record[field]);
+      byId(`edit-${field}-box`).open = false;
+    }
+    showError('edit-error', '');
+  }
+
+  function close() {
+    id = null;
+  }
+
+  byId('edit-back').addEventListener('click', () => {
+    close();
+    onDone(false);
+  });
+  form.addEventListener('click', () => showError('edit-error', ''));
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!date.value || !time.value) {
+      showError('edit-error', 'Doplň dátum a čas.');
+      return;
+    }
+    const values = Object.fromEntries(scales.map(({ field, picker }) => [field, picker.value]));
+    submit.disabled = true;
+    try {
+      await db.updateRecord(id, {
+        ...values,
+        datum: date.value,
+        cas: time.value.slice(0, 5),
+        jedlo: meal.value,
+        hladChut: hunger.value,
+        tempo: tempo.value,
+        poznamka: note.value.trim(),
+      });
+      close();
+      onDone(true);
+    } catch (error) {
+      console.error(error);
+      showError('edit-error', 'Záznam sa nepodarilo uložiť.');
+    } finally {
+      submit.disabled = false;
+    }
+  });
+
+  return {
+    open,
+    close,
+    setMarks: (settings) => scales.forEach(({ picker }) => picker.setMarks(settings)),
+  };
+}
+
+/** Obrazovka Záznamy: súhrn, zoznam po dňoch a úprava. */
+function createRecordsScreen(db) {
+  let request = 0;
+  let listScroll = 0;
+  let openedFromList = false;
+
+  const editForm = createEditForm(db, (saved) => {
+    if (saved) showToast('Uložené');
+    if (openedFromList) history.back();
+    else location.replace('#zaznamy');
+  });
+
+  async function remove(record) {
+    const confirmed = await askConfirm({
+      title: 'Vymazať záznam?',
+      text: `${dayLabel(record.datum)} · ${mealSummary(record)}`,
+      yes: 'Vymazať',
+      no: 'Zrušiť',
+    });
+    if (!confirmed) return;
+    await db.deleteRecord(record.id);
+    const scroll = byId('main').scrollTop;
+    await show(null);
+    byId('main').scrollTop = scroll;
+    showToast('Vymazané');
+  }
+
+  function renderList(records, settings) {
+    const summary = weekSummary(records, settings);
+    byId('sum-count').textContent = summary.count;
+    byId('sum-before').textContent = formatAverage(summary.averageBefore);
+    byId('sum-after').textContent = formatAverage(summary.averageAfter);
+    byId('sum-zone').textContent =
+      summary.zonePercent === null ? '–' : `${summary.zonePercent} %`;
+    byId('sum-not-hunger').textContent = summary.notHunger;
+
+    byId('records-empty').hidden = records.length > 0;
+    byId('records-list').replaceChildren(...groupByDay(records).map(([datum, items]) => {
+      const day = element('section', 'day');
+      const list = element('ul', 'day-list');
+      list.append(...items.map((record) => {
+        const item = element('li', 'record');
+        const background = element('span', 'record-delete', 'Vymazať');
+        background.setAttribute('aria-hidden', 'true');
+        const link = recordRow(record, settings);
+        link.addEventListener('click', () => {
+          listScroll = byId('main').scrollTop;
+          openedFromList = true;
+        });
+        addSwipeLeft(link, () => remove(record).catch((error) => {
+          console.error(error);
+          showToast('Záznam sa nepodarilo vymazať.');
+        }));
+        item.append(background, link);
+        return item;
+      }));
+      day.append(element('h3', 'day-title', dayLabel(datum)), list);
+      return day;
+    }));
+  }
+
+  /** Zobrazí zoznam (`editId` = null) alebo úpravu daného záznamu. */
+  async function show(editId) {
+    const current = ++request;
+    const [records, settings] = await Promise.all([db.getAllRecords(), db.getSettings()]);
+    if (current !== request) return;
+
+    const record = editId ? records.find((item) => item.id === editId) : null;
+    if (editId && !record) {
+      location.replace('#zaznamy');
+      return;
+    }
+    const returning = !record && !byId('edit-form').hidden;
+    byId('list-view').hidden = Boolean(record);
+    byId('edit-form').hidden = !record;
+    if (record) {
+      editForm.setMarks(settings);
+      editForm.open(record);
+      byId('main').scrollTop = 0;
+    } else {
+      editForm.close();
+      renderList(records, settings);
+      // Po návrate z úpravy sa vrátime na pôvodné miesto v zozname.
+      if (returning) byId('main').scrollTop = listScroll;
+      openedFromList = false;
+    }
+  }
+
+  return { show };
+}
+
 /* ---------- Karta ---------- */
 
 // Na karte sú značky pevné, nezávisia od nastavení zóny.
@@ -557,9 +897,12 @@ function initCard() {
 function currentRoute() {
   const hash = location.hash.slice(1);
   if (hash.startsWith(AFTER_PREFIX)) {
-    return { screen: 'zapis', afterId: hash.slice(AFTER_PREFIX.length) };
+    return { screen: 'zapis', id: hash.slice(AFTER_PREFIX.length) };
   }
-  return { screen: SCREENS.includes(hash) ? hash : SCREENS[0], afterId: null };
+  if (hash.startsWith(EDIT_PREFIX)) {
+    return { screen: 'zaznamy', id: hash.slice(EDIT_PREFIX.length) };
+  }
+  return { screen: SCREENS.includes(hash) ? hash : SCREENS[0], id: null };
 }
 
 function showScreen(name) {
@@ -633,13 +976,12 @@ async function showStorageStatus() {
 /* ---------- Spustenie ---------- */
 
 async function start() {
-  let entry = null;
+  // Obrazovky s dátami vzniknú až po otvorení databázy.
+  const screens = {};
   const route = () => {
-    const { screen, afterId } = currentRoute();
+    const { screen, id } = currentRoute();
     showScreen(screen);
-    if (screen === 'zapis') {
-      entry?.show(afterId).catch((error) => console.error(error));
-    }
+    screens[screen]?.show(id).catch((error) => console.error(error));
   };
 
   window.addEventListener('hashchange', route);
@@ -658,10 +1000,14 @@ async function start() {
 
   try {
     const db = await openDatabase();
-    entry = createEntryScreen(db);
-    const { screen, afterId } = currentRoute();
-    if (screen === 'zapis') await entry.show(afterId);
+    screens.zapis = createEntryScreen(db);
+    screens.zaznamy = createRecordsScreen(db);
+    const { screen, id } = currentRoute();
+    await screens[screen]?.show(id);
+    // Zápis potrebuje predvyplniť, aj keď sa aplikácia otvorila na inej obrazovke.
+    if (screen !== 'zapis') await screens.zapis.show(null);
     byId('zapis-content').hidden = false;
+    byId('records-content').hidden = false;
   } catch (error) {
     console.error('Databázu sa nepodarilo otvoriť:', error);
     showError('db-error', 'Databázu sa nepodarilo otvoriť. Zavri aplikáciu a skús to znova.');
@@ -669,7 +1015,7 @@ async function start() {
   }
 
   const tick = () => {
-    if (!document.hidden && currentRoute().screen === 'zapis') entry.tick();
+    if (!document.hidden && currentRoute().screen === 'zapis') screens.zapis.tick();
   };
   setInterval(tick, 1000);
   document.addEventListener('visibilitychange', tick);
