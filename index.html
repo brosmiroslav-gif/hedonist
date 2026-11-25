@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="sk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <title>Hedonist</title>
+  <meta name="description" content="Záznamník hladu a sýtosti, funguje offline.">
+  <meta name="theme-color" content="#ffffff">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" type="image/png" href="./icons/icon-192.png">
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <header class="header">
+    <div>
+      <h1 class="title">Hedonist</h1>
+      <p class="subtitle">hlad a sýtosť</p>
+    </div>
+    <a class="gear" href="#nastavenia" data-link="nastavenia" aria-label="Nastavenia">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+    </a>
+  </header>
+
+  <div class="update-bar" id="update-bar" role="status" hidden>
+    <span>Je dostupná nová verzia –</span>
+    <button type="button" id="update-button">Obnoviť</button>
+  </div>
+
+  <main class="main" id="main">
+    <section data-screen="zapis">
+      <h2>Zápis</h2>
+
+      <!-- Dočasná kontrola fontov a offline režimu (krok 1), neskôr sa odstráni. -->
+      <div class="check">
+        <p class="check-400">400 · ľščťžýáíéúäôňĺŕď ĽŠČŤŽÝÁÍÉ ↔ →</p>
+        <p class="check-600">600 · ľščťžýáíéúäôňĺŕď ĽŠČŤŽÝÁÍÉ ↔ →</p>
+        <p class="check-700">700 · ľščťžýáíéúäôňĺŕď ĽŠČŤŽÝÁÍÉ ↔ →</p>
+        <p class="check-mono-500">Mono 500 · 0123456789 STOP ZAČNI</p>
+        <p class="check-mono-600">Mono 600 · 0123456789 STOP ZAČNI</p>
+        <p id="check-offline" role="status">Pripravujem offline režim…</p>
+      </div>
+    </section>
+
+    <section data-screen="karta" hidden>
+      <h2>Karta</h2>
+    </section>
+
+    <section data-screen="zaznamy" hidden>
+      <h2>Záznamy</h2>
+    </section>
+
+    <section data-screen="odoslat" hidden>
+      <h2>Odoslať</h2>
+    </section>
+
+    <section data-screen="nastavenia" hidden>
+      <h2>Nastavenia</h2>
+    </section>
+  </main>
+
+  <nav class="nav" aria-label="Hlavná navigácia">
+    <a href="#zapis" data-link="zapis">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16zM13 7l4 4"/></svg>
+      <span>Zápis</span>
+    </a>
+    <a href="#karta" data-link="karta">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14v18H5zM8 8h8M8 12h8M8 16h5"/></svg>
+      <span>Karta</span>
+    </a>
+    <a href="#zaznamy" data-link="zaznamy">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11M4 6h1M4 12h1M4 18h1"/></svg>
+      <span>Záznamy</span>
+    </a>
+    <a href="#odoslat" data-link="odoslat">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18v14H3zM3 6l9 7 9-7"/></svg>
+      <span>Odoslať</span>
+    </a>
+  </nav>
+</body>
+</html>
