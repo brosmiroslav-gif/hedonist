@@ -131,6 +131,16 @@ export function zoneProblem({ startOd, startDo, stop }) {
   return '';
 }
 
+/** Uplynulo 20 minút od zápisu `po` a `po20` ešte chýba. */
+export function isDue(record, now = new Date()) {
+  return record.po20 === null && remainingMs(record, now) === 0;
+}
+
+/** Je na obrazovke Zápis aspoň jedna karta „Teraz: po 20 min“? */
+export function hasDueRecord(records, now = new Date()) {
+  return pendingRecords(records, now).some((record) => isDue(record, now));
+}
+
 export function formatCountdown(ms) {
   const seconds = Math.ceil(ms / 1000);
   const pad = (number) => String(number).padStart(2, '0');
@@ -538,7 +548,7 @@ function createEntryScreen(db) {
     const items = pendingRecords(records, now).map((record) => ({
       id: record.id,
       label: pendingLabel(record),
-      due: record.po20 === null && remainingMs(record, now) === 0,
+      due: isDue(record, now),
     }));
     // Prekresľujeme len pri zmene, aby sa nestratil fokus ani rozrobené ťuknutie.
     const signature = JSON.stringify(items);
@@ -1376,6 +1386,18 @@ function showScreen(name) {
   byId('main').scrollTop = 0;
 }
 
+/**
+ * Z úvodnej Karty prepne na Zápis, ak je čas na „po 20 min“. Z iných obrazoviek
+ * nepresúvame, aby sa nerušila rozrobená práca.
+ */
+async function openEntryIfDue(db) {
+  const onCard = () => currentRoute().screen === 'karta';
+  if (!onCard()) return;
+  const records = await db.getAllRecords();
+  // Používateľ mohol medzitým prejsť inam.
+  if (hasDueRecord(records) && onCard()) location.replace('#zapis');
+}
+
 /* ---------- Service worker ---------- */
 
 async function registerServiceWorker() {
@@ -1468,6 +1490,10 @@ async function start() {
       screens[screen]?.show(id).catch((error) => console.error(error));
     });
     screens.nastavenia = createSettingsScreen(db, reminders);
+    await openEntryIfDue(db);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) openEntryIfDue(db).catch((error) => console.error(error));
+    });
     const { screen, id } = currentRoute();
     await screens[screen]?.show(id);
     // Zápis potrebuje predvyplniť, aj keď sa aplikácia otvorila na inej obrazovke.

@@ -25,8 +25,10 @@ Potom funguje aj v režime lietadlo.
 
 ## Používanie
 
-Po spustení sa otvorí **Karta**. Poradie v menu je Karta · Zápis · Záznamy ·
-Odoslať (zmena oproti sekcii 3 zadania, kde je úvodný Zápis).
+Po spustení sa otvorí **Karta**. Ak je pri niektorom jedle čas na
+**„Teraz: po 20 min“**, otvorí sa rovno **Zápis** – pri spustení aj po návrate do
+aplikácie, ak bola na Karte. Poradie v menu je Karta · Zápis · Záznamy · Odoslať.
+(Zmena oproti sekcii 3 zadania, kde je úvodný Zápis.)
 
 | Obrazovka | Čo robí |
 |---|---|
@@ -127,7 +129,7 @@ podadrese `/hedonist/`. Súbor `.nojekyll` vypína spracovanie Jekyllom.
 Aplikácia sa servíruje z cache service workera (cache-first).
 
 1. **Pri každej zmene súborov zvýš `CACHE_VERSION` v [sw.js](sw.js)**
-   (napr. `v8` → `v9`). Bez toho telefón ostane na starej verzii.
+   (napr. `v9` → `v10`). Bez toho telefón ostane na starej verzii.
 2. Nový súbor pridaj do zoznamu `ASSETS` v tom istom súbore.
 3. Commit a `git push`.
 4. V telefóne otvor aplikáciu s internetom a ťukni na **„Obnoviť“** v lište

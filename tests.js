@@ -6,7 +6,7 @@ import {
 } from './db.js';
 import {
   dayLabel, defaultMeal, formatAverage, formatCountdown, formatScore, formatValues, groupByDay,
-  halfScore, localDateTime, pendingLabel, pendingRecords, remainingMs, scaleMarks, shiftDate,
+  halfScore, hasDueRecord, localDateTime, pendingLabel, pendingRecords, remainingMs, scaleMarks, shiftDate,
   selectForSending, tapScore, upcomingReminders, weekSummary, zoneProblem, zoneResult,
 } from './app.js';
 import {
@@ -376,6 +376,17 @@ test('odpočet 20 minút sa počíta od poZapisane', () => {
   assertEqual(remainingMs(stored({}), NOON), null);
   assertEqual([formatCountdown(1200000), formatCountdown(61000), formatCountdown(500),
     formatCountdown(0)], ['20:00', '01:01', '00:01', '00:00']);
+});
+
+test('Zápis sa otvorí sám len pri karte „Teraz: po 20 min“', () => {
+  const due = (changes) => hasDueRecord([stored({ po: 7, ...changes })], NOON);
+  const old = '2026-11-25T10:39:00.000Z'; // pred 21 minútami
+  assertEqual(due({ poZapisane: old }), true, 'po 20 minútach');
+  assertEqual(due({ poZapisane: '2026-11-25T10:50:00.000Z' }), false, 'odpočet beží');
+  assertEqual(due({ poZapisane: old, po20: 6 }), false, 'po20 vyplnené');
+  assertEqual(due({ poZapisane: old, cas: '05:00' }), false, 'jedlo staršie ako 6 hodín');
+  assertEqual(due({ po: null }), false, 'bez po');
+  assertEqual(hasDueRecord([], NOON), false);
 });
 
 test('text karty rozpracovaného jedla', () => {
